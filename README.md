@@ -201,3 +201,39 @@ The Browser plugin currently runs local Chromium through Playwright. Use it for 
 - AI index plugin: project summaries, code index, semantic search
 - Office plugin: Word/Excel/PowerPoint automation
 - Database plugin: query approved local/private-cloud databases
+
+
+---
+
+# 中文說明
+
+## 專案簡介
+
+ProjectsMCP 是一個以 Plugin 為核心的 MCP Platform，目標是將各種功能模組化，例如專案管理、Git、Browser、自動化命令，以及未來的 LM Studio、Office、資料庫等插件。
+
+目前平台已具備：
+
+- 專案檔案管理
+- Git 版本控制
+- Playwright Browser 自動化
+- CMD / PowerShell 指令執行
+- Plugin 擴充架構
+
+## 快速開始
+
+1. 安裝 Python 3.13 或更新版本。
+2. 執行 `SetupProjectsMCP.bat` 安裝所需套件。
+3. 執行 `StartProjectsMCP.bat` 啟動本機 MCP Server。
+4. 如需讓 ChatGPT 存取，再執行 `StartNgrokMCP.bat` 建立公開網址。
+
+## 專案目標
+
+本專案希望建立一個容易維護、容易擴充的 MCP Platform，而不是只服務單一功能。Browser Plugin 只是第一個插件，未來會持續加入更多能力。
+
+## 開發原則
+
+- Plugin 化架構
+- Service 與 Plugin 分離
+- 優先考量可維護性
+- 盡量降低環境相依性
+- 使用 Git 進行版本控制
