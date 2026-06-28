@@ -1,0 +1,52 @@
+{
+  "projects": {
+    "market": "D:\\MarketResearch",
+    "ai": "D:\\AIProjects"
+  },
+  "plugins": {
+    "enabled": [
+      "project",
+      "browser",
+      "git",
+      "command"
+    ]
+  },
+  "settings": {
+    "max_read_bytes": 1048576,
+    "command_timeout_seconds": 60,
+    "git_timeout_seconds": 60,
+    "process_kill_grace_seconds": 3,
+    "max_command_output_bytes": 2097152,
+    "allowed_write_extensions": [
+      ".txt",
+      ".md",
+      ".json",
+      ".csv",
+      ".py",
+      ".js",
+      ".ts",
+      ".html",
+      ".css",
+      ".bat",
+      ".ps1",
+      ".yml",
+      ".yaml"
+    ],
+    "default_exclude_patterns": [
+      ".git",
+      ".svn",
+      ".hg",
+      "node_modules",
+      "bin",
+      "obj",
+      ".venv",
+      "venv",
+      "__pycache__",
+      ".pytest_cache",
+      ".mypy_cache",
+      "dist",
+      "build",
+      "artifacts"
+    ]
+  }
+}

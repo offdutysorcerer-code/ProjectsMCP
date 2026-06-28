@@ -1,0 +1,1 @@
+"""Core MCP Platform primitives."""
