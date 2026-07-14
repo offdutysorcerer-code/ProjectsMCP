@@ -25,6 +25,31 @@ class BrowserPlugin:
             return await browser_service.open(url, headless)
 
         @mcp.tool()
+        async def browser_tabs() -> dict[str, Any]:
+            """List all open browser tabs with index, title, URL, and active state."""
+            return await browser_service.tabs()
+
+        @mcp.tool()
+        async def browser_switch_tab(index: int) -> dict[str, Any]:
+            """Switch to an open browser tab by zero-based index."""
+            return await browser_service.switch_tab(index)
+
+        @mcp.tool()
+        async def browser_new_tab(url: str = "") -> dict[str, Any]:
+            """Open a new browser tab, optionally navigating to a URL."""
+            return await browser_service.new_tab(url)
+
+        @mcp.tool()
+        async def browser_close_tab(index: int | None = None) -> dict[str, Any]:
+            """Close a browser tab by index, or close the active tab when omitted."""
+            return await browser_service.close_tab(index)
+
+        @mcp.tool()
+        async def browser_activate_tab(query: str) -> dict[str, Any]:
+            """Activate the first tab whose title or URL contains the query."""
+            return await browser_service.activate_tab(query)
+
+        @mcp.tool()
         async def browser_goto(url: str) -> dict[str, Any]:
             """Navigate the active browser page to a URL."""
             return await browser_service.goto(url)
