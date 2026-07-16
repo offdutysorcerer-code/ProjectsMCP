@@ -152,10 +152,22 @@ exit /b 1
 
 :find_ngrok
 set "NGROK_CMD="
+
+rem Reload PATH values that WinGet may have changed during this CMD session.
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "USER_PATH=%%B"
+for /f "tokens=2,*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "MACHINE_PATH=%%B"
+if defined USER_PATH if defined MACHINE_PATH set "PATH=%MACHINE_PATH%;%USER_PATH%"
+
 where ngrok >nul 2>&1
 if not errorlevel 1 set "NGROK_CMD=ngrok"
 if not defined NGROK_CMD if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe" set "NGROK_CMD=%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe"
 if not defined NGROK_CMD if exist "%ProgramFiles%\WinGet\Links\ngrok.exe" set "NGROK_CMD=%ProgramFiles%\WinGet\Links\ngrok.exe"
+
+rem WinGet portable packages may live under Packages without a Links alias in the current shell.
+if not defined NGROK_CMD (
+    for /f "delims=" %%F in ('dir /b /s "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_*\ngrok.exe" 2^>nul') do if not defined NGROK_CMD set "NGROK_CMD=%%F"
+)
+
 exit /b 0
 
 :python_error

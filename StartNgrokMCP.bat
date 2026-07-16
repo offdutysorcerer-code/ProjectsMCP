@@ -12,12 +12,7 @@ echo Current dir: %CD%
 echo Local URL: http://127.0.0.1:%PORT%/sse
 echo.
 
-where ngrok >nul 2>&1
-if not errorlevel 1 set "NGROK_CMD=ngrok"
-
-if not defined NGROK_CMD if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe" set "NGROK_CMD=%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe"
-if not defined NGROK_CMD if exist "%ProgramFiles%\WinGet\Links\ngrok.exe" set "NGROK_CMD=%ProgramFiles%\WinGet\Links\ngrok.exe"
-
+call :find_ngrok
 if defined NGROK_CMD goto start_ngrok
 
 echo ngrok was not found. Trying to install it through winget...
@@ -29,13 +24,7 @@ winget source update
 winget install --id Ngrok.Ngrok -e --source winget --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto ngrok_error
 
-if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe" set "NGROK_CMD=%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe"
-if not defined NGROK_CMD if exist "%ProgramFiles%\WinGet\Links\ngrok.exe" set "NGROK_CMD=%ProgramFiles%\WinGet\Links\ngrok.exe"
-if not defined NGROK_CMD (
-    where ngrok >nul 2>&1
-    if not errorlevel 1 set "NGROK_CMD=ngrok"
-)
-
+call :find_ngrok
 if not defined NGROK_CMD goto path_error
 
 :start_ngrok
@@ -45,6 +34,22 @@ echo.
 "%NGROK_CMD%" http %PORT%
 if errorlevel 1 goto error
 goto end
+
+:find_ngrok
+set "NGROK_CMD="
+
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "USER_PATH=%%B"
+for /f "tokens=2,*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "MACHINE_PATH=%%B"
+if defined USER_PATH if defined MACHINE_PATH set "PATH=%MACHINE_PATH%;%USER_PATH%"
+
+where ngrok >nul 2>&1
+if not errorlevel 1 set "NGROK_CMD=ngrok"
+if not defined NGROK_CMD if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe" set "NGROK_CMD=%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe"
+if not defined NGROK_CMD if exist "%ProgramFiles%\WinGet\Links\ngrok.exe" set "NGROK_CMD=%ProgramFiles%\WinGet\Links\ngrok.exe"
+if not defined NGROK_CMD (
+    for /f "delims=" %%F in ('dir /b /s "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_*\ngrok.exe" 2^>nul') do if not defined NGROK_CMD set "NGROK_CMD=%%F"
+)
+exit /b 0
 
 :winget_error
 echo.
@@ -61,8 +66,8 @@ goto end
 
 :path_error
 echo.
-echo ngrok was installed, but its executable could not be located.
-echo Open a new Command Prompt and run this file again.
+echo ngrok was installed, but ngrok.exe could not be located.
+echo Search location checked: %LOCALAPPDATA%\Microsoft\WinGet\Packages
 goto end
 
 :error
