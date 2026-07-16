@@ -237,3 +237,47 @@ ProjectsMCP 是一個以 Plugin 為核心的 MCP Platform，目標是將各種�
 - 優先考量可維護性
 - 盡量降低環境相依性
 - 使用 Git 進行版本控制
+
+
+### Desktop plugin tools
+
+The Windows-only Desktop plugin provides visible and auditable mouse automation:
+
+- `mouse_highlight_start(color="#00E5FF", size=64)`
+- `mouse_highlight_stop()`
+- `mouse_highlight_status()`
+- `mouse_get_position()`
+- `mouse_move(x, y)`
+- `mouse_click(button="left", clicks=1)`
+
+The highlight is a topmost, transparent, click-through glowing ring. It follows the cursor and becomes smaller/brighter while the left mouse button is pressed. Start it before automated desktop actions and stop it afterward. The overlay is implemented by `scripts/mouse_overlay.ps1` and is managed by the MCP server process.
+
+Example operation sequence:
+
+```text
+mouse_highlight_start()
+mouse_move(500, 300)
+mouse_click()
+mouse_highlight_stop()
+```
+
+## Portable migration and repository size
+
+Runtime browser data is stored under `artifacts/`, including the persistent Edge/Chromium profile, caches, extensions, downloaded browser components, screenshots, and session databases. This directory is intentionally excluded by `.gitignore` and should not be copied to another computer unless a private browser profile backup is explicitly required.
+
+Create a minimal migration package with:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\CreatePortablePackage.ps1
+```
+
+The package excludes `artifacts`, virtual environments, Python caches, logs, local environment files, and `.git` by default. Use `-IncludeGit` only when the local Git history must be included.
+
+After extraction on another Windows computer:
+
+1. Review `config.json` and update project root paths for that computer.
+2. Run `SetupProjectsMCP.bat` to install Python dependencies and Playwright Chromium.
+3. Run `StartProjectsMCP.bat`.
+4. Run `StartNgrokMCP.bat` only when a tunnel is required.
+
+A fresh browser profile will be created automatically under `artifacts/browser_profile`. Existing login sessions, cookies, and browser extensions are not part of the portable package.

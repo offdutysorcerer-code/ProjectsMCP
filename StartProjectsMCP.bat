@@ -1,12 +1,12 @@
 ﻿@echo off
 chcp 65001 >nul
 title Start ProjectsMCP Platform
-cd /d D:\AIProjects\ProjectsMCP
+cd /d "%~dp0"
 set "HOST=127.0.0.1"
 set "PORT=8090"
 echo Starting ProjectsMCP Platform...
 echo URL: http://%HOST%:%PORT%/sse
-echo Config: D:\AIProjects\ProjectsMCP\config.json
+echo Config: %CD%\config.json
 echo.
 where uv >nul 2>&1
 if errorlevel 1 goto uv_error

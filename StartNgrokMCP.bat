@@ -1,21 +1,20 @@
-﻿@echo off
-echo DEBUG: StartNgrokMCP.bat started
-chcp 65001
+@echo off
+chcp 65001 >nul
 title ProjectsMCP Ngrok Tunnel
-cd /d D:\AIProjects\ProjectsMCP
-echo DEBUG: Current dir = D:\AIProjects\ProjectsMCP
-set "PORT=8090
+cd /d "%~dp0"
+set "PORT=8090"
 echo Starting ngrok tunnel for ProjectsMCP...
+echo Current dir: %CD%
 echo Local URL: http://127.0.0.1:%PORT%/sse
 echo.
-where ngrok
+where ngrok >nul 2>&1
 if errorlevel 1 goto install_ngrok
 goto start_ngrok
 :install_ngrok
 echo ngrok was not found in PATH.
 echo Trying to install ngrok through winget...
 echo.
-where winget
+where winget >nul 2>&1
 if errorlevel 1 goto winget_error
 winget install --id ngrok.ngrok -e
 if errorlevel 1 goto ngrok_error

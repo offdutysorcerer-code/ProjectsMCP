@@ -9,7 +9,8 @@
       "browser",
       "git",
       "command",
-      "mail_reader"
+      "mail_reader",
+      "desktop"
     ]
   },
   "settings": {

@@ -9,6 +9,7 @@ from mcp_platform.context import PlatformContext
 from mcp_platform.plugin_registry import PluginRegistry
 from services.browser_service import BrowserService
 from services.config_service import ConfigService
+from services.desktop_service import DesktopService
 from services.file_service import FileService
 from services.git_service import GitService
 from services.process_service import ProcessService
@@ -21,6 +22,7 @@ mcp = FastMCP("ProjectsMCP Platform")
 config_service = ConfigService(CONFIG_PATH)
 file_service = FileService(config_service)
 browser_service = BrowserService(ARTIFACTS_DIR / "browser")
+desktop_service = DesktopService(APP_DIR / "scripts" / "mouse_overlay.ps1")
 settings = config_service.get_settings()
 process_service = ProcessService(
     default_timeout_seconds=int(settings.get("command_timeout_seconds", 60)),
@@ -36,6 +38,7 @@ context = PlatformContext(
     config_service=config_service,
     file_service=file_service,
     browser_service=browser_service,
+    desktop_service=desktop_service,
     git_service=git_service,
     process_service=process_service,
 )

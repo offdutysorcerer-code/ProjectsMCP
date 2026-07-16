@@ -2,7 +2,7 @@
 chcp 65001 >nul
 title Setup ProjectsMCP Platform
 
-cd /d D:\AIProjects\ProjectsMCP
+cd /d "%~dp0"
 
 echo Setting up ProjectsMCP Platform dependencies...
 echo.
