@@ -221,10 +221,10 @@ ProjectsMCP 是一個以 Plugin 為核心的 MCP Platform，目標是將各種�
 
 ## 快速開始
 
-1. 安裝 Python 3.13 或更新版本。
-2. 執行 `SetupProjectsMCP.bat` 安裝所需套件。
-3. 執行 `StartProjectsMCP.bat` 啟動本機 MCP Server。
-4. 如需讓 ChatGPT 存取，再執行 `StartNgrokMCP.bat` 建立公開網址。
+1. 安裝 Python 3.11 或更新版本。
+2. 執行 `SetupProjectsMCP.bat`。它會自動安裝 uv、Python 套件、Playwright Chromium 與 ngrok；若尚未設定 ngrok，會要求輸入 authtoken。
+3. 安裝完成後可直接選擇啟動 ProjectsMCP 與 ngrok tunnel，也可日後分別執行 `StartProjectsMCP.bat`、`StartNgrokMCP.bat`。
+4. 若 WinGet 的 ngrok 安裝失敗，Setup 會自動重設並更新 WinGet source 後重試一次。
 
 ## 專案目標
 
