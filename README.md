@@ -131,6 +131,16 @@ https://YOUR-NGROK-DOMAIN/sse
 
 After changing Python files, restart `StartProjectsMCP.bat`, then refresh the connector in ChatGPT.
 
+## Runtime logs
+
+`StartProjectsMCP.bat` writes the combined launcher, uv, mcp-proxy, and MCP server output to:
+
+```text
+D:\\AIProjects\\ProjectsMCP\\logs\\projectsmcp-YYYY-MM-DD_HH-mm-ss.log
+```
+
+Output remains visible in the console while it is written to disk. A new file is created for each launch, and log files older than 30 days are removed automatically. The `logs` directory is excluded from Git. For unattended startup, set `PROJECTSMCP_NO_PAUSE=1` so the batch file exits without waiting for a key after the server stops.
+
 ## Structure
 
 ```text

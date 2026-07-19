@@ -6,45 +6,24 @@ cd /d "%~dp0"
 
 set "HOST=127.0.0.1"
 set "PORT=8090"
-set "UV_CMD="
 
 echo Starting ProjectsMCP Platform...
 echo URL: http://%HOST%:%PORT%/sse
-echo Config: %CD%\config.json
+echo Logs: %CD%\logs
 echo.
 
-where uv >nul 2>&1
-if not errorlevel 1 set "UV_CMD=uv"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start_projectsmcp.ps1" -HostAddress "%HOST%" -Port %PORT%
+set "EXIT_CODE=%ERRORLEVEL%"
 
-if not defined UV_CMD (
-    py -m uv --version >nul 2>&1
-    if not errorlevel 1 set "UV_CMD=py -m uv"
+if not "%EXIT_CODE%"=="0" (
+    echo.
+    echo ProjectsMCP failed or stopped unexpectedly.
+    echo Check the newest file under: %CD%\logs
 )
 
-if not defined UV_CMD (
-    python -m uv --version >nul 2>&1
-    if not errorlevel 1 set "UV_CMD=python -m uv"
+if /I not "%PROJECTSMCP_NO_PAUSE%"=="1" (
+    echo.
+    pause
 )
 
-if not defined UV_CMD goto uv_error
-
-echo Using: %UV_CMD%
-echo Starting MCP proxy...
-echo.
-call %UV_CMD% tool run mcp-proxy --host %HOST% --port %PORT% -- %UV_CMD% run --with-requirements requirements.txt python server.py
-if errorlevel 1 goto error
-goto end
-
-:uv_error
-echo uv is not installed or cannot be found.
-echo Please run SetupProjectsMCP.bat first.
-goto end
-
-:error
-echo.
-echo ProjectsMCP failed to start. Please check the error message above.
-
-:end
-echo.
-pause
-endlocal
+endlocal & exit /b %EXIT_CODE%
