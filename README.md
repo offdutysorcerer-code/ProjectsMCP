@@ -293,3 +293,12 @@ After extraction on another Windows computer:
 
 A fresh browser profile will be created automatically under `artifacts/browser_profile`. Existing login sessions, cookies, and browser extensions are not part of the portable package.
 
+
+## 附件保存工具
+
+啟用 `attachment` plugin 後，可使用不經 Base64 的本機附件保存流程：
+
+- `attachment_save_file`：從 `attachment_source_directory` 內的本機暫存檔串流複製到 `attachment_save_directory`。
+- `attachment_storage_info`：查看來源目錄、目的目錄、傳輸方式與檔案大小上限。
+
+附件工具接受所有檔案類型，預設單檔上限為 1 GiB。複製時會先寫入 `.part` 檔並計算 SHA-256，成功後才原子替換正式檔案；來源與目的路徑都會限制在設定目錄內，並阻擋路徑穿越與符號連結來源。

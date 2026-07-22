@@ -10,10 +10,14 @@
       "git",
       "command",
       "mail_reader",
-      "desktop"
+      "desktop",
+      "attachment"
     ]
   },
   "settings": {
+    "attachment_save_directory": "D:\\07庫電腦D槽-214585\\214585\\C342\\History",
+    "attachment_source_directory": "D:\\AIProjects\\A16-mcp-relay\\company-agent\\attachments",
+    "max_attachment_bytes": 1073741824,
     "max_read_bytes": 1048576,
     "command_timeout_seconds": 60,
     "git_timeout_seconds": 60,
