@@ -4,6 +4,10 @@ chcp 65001 >nul
 title Setup ProjectsMCP Platform
 cd /d "%~dp0"
 
+rem Keep the current process PATH and add standard per-user WinGet locations.
+set "PATH=%LOCALAPPDATA%\Microsoft\WindowsApps;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+set "UV_PYTHON=3.13"
+
 set "PY_CMD="
 set "UV_CMD="
 set "NGROK_CMD="
@@ -43,6 +47,10 @@ if not defined UV_CMD (
     if errorlevel 1 goto uv_error
     set "UV_CMD=%PY_CMD% -m uv"
 )
+
+echo Preparing Python %UV_PYTHON%...
+call %UV_CMD% python install %UV_PYTHON%
+if errorlevel 1 goto managed_python_error
 
 echo Python and uv are ready.
 echo.
@@ -88,6 +96,11 @@ if not defined NGROK_CMD goto ngrok_path_error
 
 :ngrok_found
 echo ngrok is ready: %NGROK_CMD%
+echo Checking for a supported ngrok agent update...
+"%NGROK_CMD%" update
+if errorlevel 1 goto ngrok_update_error
+call :find_ngrok
+if not defined NGROK_CMD goto ngrok_path_error
 echo.
 
 rem --------------------------------------------------
@@ -121,6 +134,8 @@ echo but StartNgrokMCP.bat will require a valid ngrok token.
 goto setup_complete
 
 :token_ready
+"%NGROK_CMD%" config check >nul 2>&1
+if errorlevel 1 goto token_error
 echo ngrok authentication is ready.
 
 :setup_complete
@@ -153,11 +168,6 @@ exit /b 1
 :find_ngrok
 set "NGROK_CMD="
 
-rem Reload PATH values that WinGet may have changed during this CMD session.
-for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "USER_PATH=%%B"
-for /f "tokens=2,*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "MACHINE_PATH=%%B"
-if defined USER_PATH if defined MACHINE_PATH set "PATH=%MACHINE_PATH%;%USER_PATH%"
-
 where ngrok >nul 2>&1
 if not errorlevel 1 set "NGROK_CMD=ngrok"
 if not defined NGROK_CMD if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe" set "NGROK_CMD=%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe"
@@ -165,7 +175,9 @@ if not defined NGROK_CMD if exist "%ProgramFiles%\WinGet\Links\ngrok.exe" set "N
 
 rem WinGet portable packages may live under Packages without a Links alias in the current shell.
 if not defined NGROK_CMD (
-    for /f "delims=" %%F in ('dir /b /s "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_*\ngrok.exe" 2^>nul') do if not defined NGROK_CMD set "NGROK_CMD=%%F"
+    for /d %%D in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_*") do (
+        if exist "%%~D\ngrok.exe" if not defined NGROK_CMD set "NGROK_CMD=%%~D\ngrok.exe"
+    )
 )
 
 exit /b 0
@@ -174,6 +186,11 @@ exit /b 0
 echo.
 echo ERROR: Python was not found.
 echo Install Python 3.11 or newer and enable the Python launcher or PATH option.
+goto failure_end
+
+:managed_python_error
+echo.
+echo ERROR: uv could not install or locate Python %UV_PYTHON%.
 goto failure_end
 
 :uv_error
@@ -196,6 +213,13 @@ goto failure_end
 echo.
 echo ERROR: WinGet was not found.
 echo Install or update "App Installer" from Microsoft Store, then run setup again.
+goto failure_end
+
+:ngrok_update_error
+echo.
+echo ERROR: ngrok could not update to a supported agent version.
+echo Try: "%NGROK_CMD%" update
+echo Or download the current Windows agent from https://ngrok.com/download
 goto failure_end
 
 :ngrok_install_error

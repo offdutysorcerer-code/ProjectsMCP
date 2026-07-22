@@ -8,6 +8,9 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
+# Keep every standalone launch on the Python version prepared by SetupProjectsMCP.bat.
+$env:UV_PYTHON = "3.13"
+
 $logDirectory = Join-Path $projectRoot "logs"
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 

@@ -4,6 +4,9 @@ chcp 65001 >nul
 title ProjectsMCP Ngrok Tunnel
 cd /d "%~dp0"
 
+rem Keep inherited PATH and add standard per-user WinGet locations.
+set "PATH=%LOCALAPPDATA%\Microsoft\WindowsApps;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+
 set "PORT=8090"
 set "NGROK_CMD="
 
@@ -38,16 +41,14 @@ goto end
 :find_ngrok
 set "NGROK_CMD="
 
-for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "USER_PATH=%%B"
-for /f "tokens=2,*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul ^| findstr /I "Path"') do set "MACHINE_PATH=%%B"
-if defined USER_PATH if defined MACHINE_PATH set "PATH=%MACHINE_PATH%;%USER_PATH%"
-
 where ngrok >nul 2>&1
 if not errorlevel 1 set "NGROK_CMD=ngrok"
 if not defined NGROK_CMD if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe" set "NGROK_CMD=%LOCALAPPDATA%\Microsoft\WinGet\Links\ngrok.exe"
 if not defined NGROK_CMD if exist "%ProgramFiles%\WinGet\Links\ngrok.exe" set "NGROK_CMD=%ProgramFiles%\WinGet\Links\ngrok.exe"
 if not defined NGROK_CMD (
-    for /f "delims=" %%F in ('dir /b /s "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_*\ngrok.exe" 2^>nul') do if not defined NGROK_CMD set "NGROK_CMD=%%F"
+    for /d %%D in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_*") do (
+        if exist "%%~D\ngrok.exe" if not defined NGROK_CMD set "NGROK_CMD=%%~D\ngrok.exe"
+    )
 )
 exit /b 0
 
@@ -73,6 +74,7 @@ goto end
 :error
 echo.
 echo ngrok failed to start.
+echo Run SetupProjectsMCP.bat to update ngrok and validate its configuration.
 echo If this is the first run, configure your token first:
 echo ngrok config add-authtoken YOUR_TOKEN
 goto end

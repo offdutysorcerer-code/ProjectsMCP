@@ -231,10 +231,11 @@ ProjectsMCP 是一個以 Plugin 為核心的 MCP Platform，目標是將各種�
 
 ## 快速開始
 
-1. 安裝 Python 3.11 或更新版本。
+1. 安裝任一可用的 Python；Setup 會透過 uv 自動準備並固定使用 Python 3.13，以符合 MCP 套件需求。
 2. 執行 `SetupProjectsMCP.bat`。它會自動安裝 uv、Python 套件、Playwright Chromium 與 ngrok；若尚未設定 ngrok，會要求輸入 authtoken。
 3. 安裝完成後可直接選擇啟動 ProjectsMCP 與 ngrok tunnel，也可日後分別執行 `StartProjectsMCP.bat`、`StartNgrokMCP.bat`。
-4. 若 WinGet 的 ngrok 安裝失敗，Setup 會自動重設並更新 WinGet source 後重試一次。
+4. Setup 會保留現有 PATH，補入 WindowsApps 與 WinGet Links，並搜尋 WinGet portable package 目錄。若 WinGet 的 ngrok 安裝失敗，Setup 會重設並更新 WinGet source 後重試一次。
+5. Setup 找到 ngrok 後會執行官方 agent 更新並驗證設定檔，避免過舊 agent 或不相容設定在啟動 tunnel 時才失敗。
 
 ## 專案目標
 
@@ -291,3 +292,4 @@ After extraction on another Windows computer:
 4. Run `StartNgrokMCP.bat` only when a tunnel is required.
 
 A fresh browser profile will be created automatically under `artifacts/browser_profile`. Existing login sessions, cookies, and browser extensions are not part of the portable package.
+
