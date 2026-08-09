@@ -76,7 +76,9 @@ try {
     Write-LoggedLine "INFO" "Using uv: $($uvCommand.Display)"
 
     $arguments = @($uvCommand.Prefix) + @(
-        "tool", "run", "mcp-proxy",
+        "tool", "run",
+        "--with", "mcp>=1.27,<2",
+        "mcp-proxy==0.12.0",
         "--host", $HostAddress,
         "--port", $Port,
         "--",

@@ -12,6 +12,7 @@ from services.config_service import ConfigService
 from services.desktop_service import DesktopService
 from services.file_service import FileService
 from services.git_service import GitService
+from services.line_a23_service import LineA23Service
 from services.process_service import ProcessService
 
 APP_DIR = Path(__file__).resolve().parent
@@ -24,6 +25,10 @@ file_service = FileService(config_service)
 browser_service = BrowserService(ARTIFACTS_DIR / "browser")
 desktop_service = DesktopService(APP_DIR / "scripts" / "mouse_overlay.ps1")
 settings = config_service.get_settings()
+line_a23_service = LineA23Service(
+    endpoint=str(settings.get("line_a23_endpoint", "http://127.0.0.1:3000/mcp")),
+    timeout_seconds=float(settings.get("line_a23_timeout_seconds", 120)),
+)
 process_service = ProcessService(
     default_timeout_seconds=int(settings.get("command_timeout_seconds", 60)),
     max_output_bytes=int(settings.get("max_command_output_bytes", 2097152)),
@@ -40,6 +45,7 @@ context = PlatformContext(
     browser_service=browser_service,
     desktop_service=desktop_service,
     git_service=git_service,
+    line_a23_service=line_a23_service,
     process_service=process_service,
 )
 registry = PluginRegistry(context)

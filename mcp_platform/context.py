@@ -7,6 +7,7 @@ from services.config_service import ConfigService
 from services.desktop_service import DesktopService
 from services.file_service import FileService
 from services.git_service import GitService
+from services.line_a23_service import LineA23Service
 from services.process_service import ProcessService
 
 
@@ -19,4 +20,5 @@ class PlatformContext:
     browser_service: BrowserService
     desktop_service: DesktopService
     git_service: GitService
+    line_a23_service: LineA23Service
     process_service: ProcessService

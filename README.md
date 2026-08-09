@@ -109,6 +109,36 @@ python -m playwright install chromium
 
 Then restart the server and refresh the connector in ChatGPT.
 
+## LINE A23 proxy plugin
+
+The `line_a23` plugin keeps the architecture `ChatGPT -> ProjectsMCP -> A23 -> LINE Desktop`.
+ProjectsMCP exposes the five LINE tools and forwards each call to the local A23 Streamable HTTP endpoint configured in `config.json`:
+
+```json
+{
+  "settings": {
+    "line_a23_endpoint": "http://127.0.0.1:3000/mcp",
+    "line_a23_timeout_seconds": 120
+  }
+}
+```
+
+Start A23 before ProjectsMCP:
+
+```powershell
+cd D:\AIProjects\A23-LineMCPServer研究
+node src/server.js --http-mode --host 127.0.0.1 --port 3000
+```
+
+The plugin adds:
+
+- `line_a23_status()`
+- `get_line_chatroom_history_default(...)`
+- `get_line_chatroom_history_long(...)`
+- `get_line_chatroom_history_short(...)`
+- `send_message_manual(...)`
+- `send_message_auto(...)`
+
 ## Start server
 
 Run:
