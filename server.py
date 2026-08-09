@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 
 from mcp_platform.context import PlatformContext
 from mcp_platform.plugin_registry import PluginRegistry
+from services.a3_2_service import A3_2Service
 from services.browser_service import BrowserService
 from services.config_service import ConfigService
 from services.desktop_service import DesktopService
@@ -25,6 +26,11 @@ file_service = FileService(config_service)
 browser_service = BrowserService(ARTIFACTS_DIR / "browser")
 desktop_service = DesktopService(APP_DIR / "scripts" / "mouse_overlay.ps1")
 settings = config_service.get_settings()
+a3_2_service = A3_2Service(
+    base_url=str(settings.get("a3_2_endpoint", "http://127.0.0.1:5139")),
+    timeout_seconds=float(settings.get("a3_2_timeout_seconds", 120)),
+    artifacts_dir=ARTIFACTS_DIR / "a3_2",
+)
 line_a23_service = LineA23Service(
     endpoint=str(settings.get("line_a23_endpoint", "http://127.0.0.1:3000/mcp")),
     timeout_seconds=float(settings.get("line_a23_timeout_seconds", 120)),
@@ -40,6 +46,7 @@ git_service = GitService(
     default_timeout_seconds=int(settings.get("git_timeout_seconds", 60)),
 )
 context = PlatformContext(
+    a3_2_service=a3_2_service,
     config_service=config_service,
     file_service=file_service,
     browser_service=browser_service,

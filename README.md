@@ -109,6 +109,73 @@ python -m playwright install chromium
 
 Then restart the server and refresh the connector in ChatGPT.
 
+## A3_2 WebView2 / ChatGPT proxy plugin
+
+The `a3_2` plugin keeps A3_2 as the browser runtime and ProjectsMCP as the MCP-facing adapter:
+
+```text
+ChatGPT / MCP client
+        |
+        | MCP
+        v
+ProjectsMCP (A0)
+        |
+        | HTTP 127.0.0.1:5139
+        v
+A3_2 WebView2 runtime
+        |
+        v
+authenticated ChatGPT tabs
+```
+
+A3_2 remains responsible for WebView2 tabs, persistent login state, Chromium CDP input, and ChatGPT-specific DOM handling. ProjectsMCP only translates MCP tool calls into A3_2's local HTTP API.
+
+Local settings:
+
+```json
+{
+  "settings": {
+    "a3_2_endpoint": "http://127.0.0.1:5139",
+    "a3_2_timeout_seconds": 120
+  }
+}
+```
+
+Start A3_2 before using these tools. The first MCP surface intentionally does not expose arbitrary JavaScript execution.
+
+Browser/runtime tools:
+
+- `a3_2_status()`
+- `a3_2_list_tabs()`
+- `a3_2_new_tab(url="", activate=true)`
+- `a3_2_close_tab(tab_id)`
+- `a3_2_activate_tab(tab_id)`
+- `a3_2_navigate(tab_id, input)`
+- `a3_2_get_text(tab_id, max_chars=12000)`
+- `a3_2_screenshot(tab_id)`
+
+ChatGPT adapter tools:
+
+- `a3_2_chatgpt_send_message(tab_id, message, timeout_seconds=120)`
+- `a3_2_chatgpt_get_messages(tab_id)`
+- `a3_2_chatgpt_get_last_response(tab_id)`
+
+Agent registry/orchestration tools:
+
+- `a3_2_register_agent(name, role, tab_id, instructions="")`
+- `a3_2_list_agents()`
+- `a3_2_unregister_agent(name)`
+- `a3_2_initialize_agent(name, timeout_seconds=120)`
+- `a3_2_send_to_agent(name, message, timeout_seconds=120)`
+
+The agent registry is stored locally under `artifacts/a3_2/agents.json`, which is excluded from Git. Registration maps a logical agent name and role to an A3_2 GUID `tabId`. A tab ID is stable during one A3_2 process but is currently recreated after an A3_2 restart, so logical agents must be rebound to the new tab IDs after restart. Rebinding to a different tab automatically clears the `initialized` flag.
+
+Agent dispatch has two safety layers: a per-agent cooldown and a global ChatGPT cooldown shared by all registered agents. Normal sends enforce a minimum interval. If any A3_2 tab reports the ChatGPT rate-limit dialog, A0 stops further agent dispatch and applies exponential backoff of 5, 10, 20, then up to 30 minutes. `a3_2_initialize_agent` and `a3_2_send_to_agent` return structured `status`, `retryAfterSeconds`, and `cooldownUntil` fields instead of automatically retrying.
+
+The ChatGPT send tool delegates browser-native input, submission, rate-limit detection, final-response confirmation, and assistant-message extraction to A3_2. A3_2 reports rate limiting as HTTP 429; the A0 adapter converts it into structured MCP results where appropriate.
+
+All `a3_2_*` MCP tools opt into FastMCP structured output and declare Pydantic return contracts, so ChatGPT receives a concrete `outputSchema` for tab lists, ChatGPT messages, agent state, dispatch results, and cooldown/rate-limit responses.
+
 ## LINE A23 proxy plugin
 
 The `line_a23` plugin keeps the architecture `ChatGPT -> ProjectsMCP -> A23 -> LINE Desktop`.

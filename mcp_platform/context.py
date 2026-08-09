@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from services.a3_2_service import A3_2Service
 from services.browser_service import BrowserService
 from services.config_service import ConfigService
 from services.desktop_service import DesktopService
@@ -15,6 +16,7 @@ from services.process_service import ProcessService
 class PlatformContext:
     """Shared services passed to every MCP Platform plugin."""
 
+    a3_2_service: A3_2Service
     config_service: ConfigService
     file_service: FileService
     browser_service: BrowserService
