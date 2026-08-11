@@ -53,6 +53,7 @@ local_agent_service = LocalAgentService(
     process_service=process_service,
     worker_dir=Path(str(settings.get("local_agent_worker_dir", r"D:\AIProjects\A28-Agent2AgentWithLMStudio"))),
     timeout_seconds=int(settings.get("local_agent_timeout_seconds", 180)),
+    max_concurrent_jobs=int(settings.get("local_agent_max_concurrent_jobs", 4)),
 )
 context = PlatformContext(
     a3_2_service=a3_2_service,

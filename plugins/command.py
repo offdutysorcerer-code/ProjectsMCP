@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -87,32 +88,32 @@ class CommandPlugin:
             }
 
         @mcp.tool()
-        def run_command(
+        async def run_command(
             command: str,
             shell: str = "cmd",
             cwd: str = "",
             timeout_seconds: int | None = None,
         ) -> dict[str, Any]:
-            """Execute a command with bounded output and terminate its process tree on timeout."""
-            return _execute_command(command, shell, cwd, timeout_seconds)
+            """Execute a command without blocking the FastMCP event loop."""
+            return await asyncio.to_thread(_execute_command, command, shell, cwd, timeout_seconds)
 
         @mcp.tool()
-        def run_powershell(
+        async def run_powershell(
             command: str,
             cwd: str = "",
             timeout_seconds: int | None = None,
         ) -> dict[str, Any]:
-            """Execute a non-interactive PowerShell command."""
-            return _execute_command(command, "powershell", cwd, timeout_seconds)
+            """Execute a non-interactive PowerShell command without blocking the FastMCP event loop."""
+            return await asyncio.to_thread(_execute_command, command, "powershell", cwd, timeout_seconds)
 
         @mcp.tool()
-        def run_cmd(
+        async def run_cmd(
             command: str,
             cwd: str = "",
             timeout_seconds: int | None = None,
         ) -> dict[str, Any]:
-            """Execute a CMD command."""
-            return _execute_command(command, "cmd", cwd, timeout_seconds)
+            """Execute a CMD command without blocking the FastMCP event loop."""
+            return await asyncio.to_thread(_execute_command, command, "cmd", cwd, timeout_seconds)
 
         @mcp.tool()
         def restart_projectsmcp(

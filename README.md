@@ -409,3 +409,15 @@ A fresh browser profile will be created automatically under `artifacts/browser_p
 
 附件工具接受所有檔案類型，預設單檔上限為 1 GiB。複製時會先寫入 `.part` 檔並計算 SHA-256，成功後才原子替換正式檔案；來源與目的路徑都會限制在設定目錄內，並阻擋路徑穿越與符號連結來源。
 
+
+
+## Local Agent asynchronous jobs
+
+Long-running A28 / LM Studio coding tasks can be dispatched without holding an MCP request open:
+
+- `local_agent_submit_task(...)` queues work and immediately returns a `task_id`.
+- `local_agent_task_status(task_id)` reports `queued`, `running`, or the final task status.
+- `local_agent_task_result(task_id)` returns the result when ready; completed results are persisted under the A28 task results directory.
+- `local_agent_run_task(...)` remains for compatibility, but its blocking worker execution is offloaded with `asyncio.to_thread` so it no longer blocks the FastMCP event loop.
+
+`local_agent_max_concurrent_jobs` controls the local dispatcher worker pool size (default: 4). Each running job starts its own A28 worker process through `ProcessService`, so multiple local Agent jobs can progress concurrently. The command plugin likewise offloads blocking command execution from the FastMCP event loop.
