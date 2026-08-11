@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 import shutil
 from pathlib import Path
@@ -111,6 +113,120 @@ class CommandPlugin:
         ) -> dict[str, Any]:
             """Execute a CMD command."""
             return _execute_command(command, "cmd", cwd, timeout_seconds)
+
+        @mcp.tool()
+        def restart_projectsmcp(
+            delay_seconds: int = 3,
+            startup_timeout_seconds: int = 30,
+        ) -> dict[str, Any]:
+            """Schedule a detached ProjectsMCP restart watchdog and return before the current server stops."""
+            project_root = Path(__file__).resolve().parents[1]
+            script = project_root / "scripts" / "restart_projectsmcp.ps1"
+            result_path = project_root / "artifacts" / "restart" / "latest.json"
+            if not script.is_file():
+                return {"ok": False, "status": "error", "message": f"Restart script not found: {script}"}
+
+            powershell = shutil.which("powershell") or shutil.which("pwsh")
+            if not powershell:
+                return {"ok": False, "status": "error", "message": "PowerShell executable was not found in PATH."}
+
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "status": "queued",
+                        "message": "Restart watchdog is being launched.",
+                        "port": 8090,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ) + "\n",
+                encoding="utf-8",
+            )
+
+            def ps_quote(value: str) -> str:
+                return "'" + value.replace("'", "''") + "'"
+
+            watchdog_args = [
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                "-Port",
+                "8090",
+                "-DelaySeconds",
+                str(max(1, int(delay_seconds))),
+                "-StartupTimeoutSeconds",
+                str(max(5, int(startup_timeout_seconds))),
+                "-ResultPath",
+                str(result_path),
+            ]
+            args_literal = ",".join(ps_quote(arg) for arg in watchdog_args)
+            launcher_script = (
+                f"$a=@({args_literal}); "
+                f"$p=Start-Process -FilePath {ps_quote(powershell)} -ArgumentList $a "
+                f"-WorkingDirectory {ps_quote(str(project_root))} -WindowStyle Hidden -PassThru; "
+                "$p.Id"
+            )
+            encoded = base64.b64encode(launcher_script.encode("utf-16-le")).decode("ascii")
+            launch = process_service.run(
+                [
+                    powershell,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    encoded,
+                ],
+                cwd=project_root,
+                timeout_seconds=10,
+            )
+            if not launch.get("ok"):
+                result_path.write_text(
+                    json.dumps(
+                        {
+                            "status": "launch_failed",
+                            "message": str(launch.get("stderr") or "Restart watchdog launcher failed."),
+                            "port": 8090,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
+                return {
+                    "ok": False,
+                    "status": "launch_failed",
+                    "result_path": str(result_path),
+                    "process": launch,
+                }
+
+            watchdog_pid = str(launch.get("stdout") or "").strip().splitlines()[-1]
+            return {
+                "ok": True,
+                "status": "scheduled",
+                "watchdog_pid": watchdog_pid,
+                "result_path": str(result_path),
+                "message": "ProjectsMCP restart scheduled. Reconnect and call get_restart_status after the endpoint returns.",
+            }
+
+        @mcp.tool()
+        def get_restart_status() -> dict[str, Any]:
+            """Read the latest detached ProjectsMCP restart watchdog result."""
+            project_root = Path(__file__).resolve().parents[1]
+            result_path = project_root / "artifacts" / "restart" / "latest.json"
+            if not result_path.is_file():
+                return {"ok": False, "status": "not_found", "message": "No restart status has been recorded yet."}
+            try:
+                payload = json.loads(result_path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError) as exc:
+                return {"ok": False, "status": "error", "message": f"Unable to read restart status: {exc}"}
+            return {"ok": payload.get("status") == "ready", **payload, "result_path": str(result_path)}
 
 
 def create_plugin() -> CommandPlugin:
