@@ -9,6 +9,7 @@ from services.desktop_service import DesktopService
 from services.file_service import FileService
 from services.git_service import GitService
 from services.line_a23_service import LineA23Service
+from services.local_agent_service import LocalAgentService
 from services.process_service import ProcessService
 
 
@@ -23,4 +24,5 @@ class PlatformContext:
     desktop_service: DesktopService
     git_service: GitService
     line_a23_service: LineA23Service
+    local_agent_service: LocalAgentService
     process_service: ProcessService

@@ -21,6 +21,31 @@ Get-ChildItem -Path $logDirectory -Filter "projectsmcp-*.log" -File -ErrorAction
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $logPath = Join-Path $logDirectory "projectsmcp-$timestamp.log"
 
+function Append-LogSafe {
+    param([string]$Line)
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $stream = New-Object System.IO.FileStream(
+        $logPath,
+        [System.IO.FileMode]::Append,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::ReadWrite
+    )
+    try {
+        $writer = New-Object System.IO.StreamWriter($stream, $utf8)
+        try {
+            $writer.WriteLine($Line)
+            $writer.Flush()
+        }
+        finally {
+            $writer.Dispose()
+        }
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 function Write-LoggedLine {
     param(
         [string]$Level,
@@ -29,7 +54,7 @@ function Write-LoggedLine {
 
     $line = "[{0}] [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"), $Level, $Message
     Write-Host $line
-    Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+    Append-LogSafe $line
 }
 
 function Find-UvCommand {
@@ -94,7 +119,7 @@ try {
     & $uvCommand.Executable @arguments 2>&1 | ForEach-Object {
         $message = $_.ToString()
         Write-Host $message
-        Add-Content -LiteralPath $logPath -Value $message -Encoding UTF8
+        Append-LogSafe $message
     }
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = "Stop"

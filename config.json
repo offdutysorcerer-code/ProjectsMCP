@@ -11,10 +11,19 @@
       "command",
       "mail_reader",
       "desktop",
-      "attachment"
+      "attachment",
+      "line_a23",
+      "a3_2",
+      "local_agent"
     ]
   },
   "settings": {
+    "a3_2_endpoint": "http://127.0.0.1:5139",
+    "a3_2_timeout_seconds": 120,
+    "local_agent_worker_dir": "D:\\AIProjects\\A28-Agent2AgentWithLMStudio",
+    "local_agent_timeout_seconds": 180,
+    "line_a23_endpoint": "http://127.0.0.1:3000/mcp",
+    "line_a23_timeout_seconds": 120,
     "attachment_save_directory": "D:\\07庫電腦D槽-214585\\214585\\C342\\History",
     "attachment_source_directory": "D:\\AIProjects\\A16-mcp-relay\\company-agent\\attachments",
     "max_attachment_bytes": 1073741824,

@@ -8,10 +8,14 @@ from services.a3_2_contracts import (
     AgentDispatchOutput,
     AgentOutput,
     AgentsOutput,
+    AgentTaskOutput,
+    AgentTasksOutput,
+    PathClaimsOutput,
     ChatGptMessageOutput,
     ChatGptSendOutput,
     MessagesOutput,
     NewTabOutput,
+    JavaScriptOutput,
     RateLimitOutput,
     ScreenshotOutput,
     StatusOutput,
@@ -37,7 +41,8 @@ class A3_2Plugin:
         @mcp.tool(structured_output=True)
         async def a3_2_list_tabs() -> TabsOutput:
             """List A3_2 tabs using their process-stable GUID tab IDs."""
-            return TabsOutput.model_validate(await service.list_tabs())
+            tabs = await service.list_tabs()
+            return TabsOutput(count=len(tabs), tabs=tabs)
 
         @mcp.tool(structured_output=True)
         async def a3_2_new_tab(url: str = "", activate: bool = True) -> NewTabOutput:
@@ -65,6 +70,13 @@ class A3_2Plugin:
             return TextOutput.model_validate(await service.get_text(tab_id, max_chars))
 
         @mcp.tool(structured_output=True)
+        async def a3_2_execute_javascript(tab_id: str, script: str) -> JavaScriptOutput:
+            """Execute JavaScript in an A3_2 tab and return the serialized result."""
+            return JavaScriptOutput.model_validate(
+                await service.execute_javascript(tab_id, script)
+            )
+
+        @mcp.tool(structured_output=True)
         async def a3_2_screenshot(tab_id: str) -> ScreenshotOutput:
             """Save a PNG screenshot from an A3_2 tab and return the local artifact path."""
             return ScreenshotOutput.model_validate(await service.screenshot(tab_id))
@@ -88,7 +100,8 @@ class A3_2Plugin:
         @mcp.tool(structured_output=True)
         async def a3_2_chatgpt_get_messages(tab_id: str) -> MessagesOutput:
             """Read user and assistant messages from an A3_2 ChatGPT conversation tab."""
-            return MessagesOutput.model_validate(await service.chatgpt_get_messages(tab_id))
+            messages = await service.chatgpt_get_messages(tab_id)
+            return MessagesOutput(count=len(messages), messages=messages)
 
         @mcp.tool(structured_output=True)
         async def a3_2_chatgpt_get_last_response(tab_id: str) -> ChatGptMessageOutput:
@@ -116,6 +129,73 @@ class A3_2Plugin:
         async def a3_2_unregister_agent(name: str) -> UnregisterAgentOutput:
             """Remove an A3_2 agent registration without closing its browser tab."""
             return UnregisterAgentOutput.model_validate(await service.unregister_agent(name))
+
+        @mcp.tool(structured_output=True)
+        async def a3_2_assign_agent_task(
+            name: str,
+            task_id: str,
+            objective: str,
+            project: str,
+            working_path: str = "",
+            read_scopes: list[str] | None = None,
+            write_scopes: list[str] | None = None,
+            acceptance_criteria: list[str] | None = None,
+        ) -> AgentTaskOutput:
+            """Assign one scoped task to an agent without baking task-specific rules into base instructions."""
+            return AgentTaskOutput.model_validate(
+                await service.assign_agent_task(
+                    name,
+                    task_id,
+                    objective,
+                    project,
+                    working_path,
+                    read_scopes,
+                    write_scopes,
+                    acceptance_criteria,
+                )
+            )
+
+        @mcp.tool(structured_output=True)
+        async def a3_2_complete_agent_task(
+            name: str,
+            task_id: str,
+            status: str = "completed",
+        ) -> AgentTaskOutput:
+            """Finish, cancel, or block an assigned task and release that task's path claims."""
+            return AgentTaskOutput.model_validate(
+                await service.complete_agent_task(name, task_id, status)
+            )
+
+        @mcp.tool(structured_output=True)
+        async def a3_2_list_agent_tasks(status: str = "") -> AgentTasksOutput:
+            """List registered orchestration tasks, optionally filtered by status."""
+            return AgentTasksOutput.model_validate(await service.list_agent_tasks(status))
+
+        @mcp.tool(structured_output=True)
+        async def a3_2_claim_agent_paths(
+            name: str,
+            paths: list[str],
+            task_id: str = "",
+        ) -> PathClaimsOutput:
+            """Cooperatively claim project-relative paths; overlapping claims by other agents are rejected."""
+            return PathClaimsOutput.model_validate(
+                await service.claim_agent_paths(name, paths, task_id)
+            )
+
+        @mcp.tool(structured_output=True)
+        async def a3_2_release_agent_paths(
+            name: str,
+            paths: list[str] | None = None,
+        ) -> PathClaimsOutput:
+            """Release selected path claims, or all claims owned by an agent when paths is omitted."""
+            return PathClaimsOutput.model_validate(
+                await service.release_agent_paths(name, paths)
+            )
+
+        @mcp.tool(structured_output=True)
+        async def a3_2_list_agent_path_claims() -> PathClaimsOutput:
+            """List all cooperative path claims across registered agents."""
+            return PathClaimsOutput.model_validate(await service.list_agent_path_claims())
 
         @mcp.tool(structured_output=True)
         async def a3_2_initialize_agent(

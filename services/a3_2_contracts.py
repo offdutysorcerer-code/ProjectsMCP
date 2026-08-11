@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, Field
 
 
 class StatusOutput(BaseModel):
@@ -22,8 +22,9 @@ class BrowserTabOutput(BaseModel):
     isActive: bool
 
 
-class TabsOutput(RootModel[list[BrowserTabOutput]]):
-    pass
+class TabsOutput(BaseModel):
+    count: int
+    tabs: list[BrowserTabOutput]
 
 
 class NewTabOutput(BaseModel):
@@ -45,6 +46,12 @@ class TextOutput(BaseModel):
     truncated: bool
 
 
+class JavaScriptOutput(BaseModel):
+    ok: bool
+    tabId: str
+    result: str
+
+
 class ScreenshotOutput(BaseModel):
     ok: bool
     tabId: str
@@ -58,8 +65,9 @@ class ChatGptMessageOutput(BaseModel):
     messageId: str | None = None
 
 
-class MessagesOutput(RootModel[list[ChatGptMessageOutput]]):
-    pass
+class MessagesOutput(BaseModel):
+    count: int
+    messages: list[ChatGptMessageOutput]
 
 
 class ChatGptSendOutput(BaseModel):
@@ -81,13 +89,15 @@ class AgentOutput(BaseModel):
     name: str
     role: str
     tabId: str
-    instructions: str
+    baseInstructions: str = ""
+    instructions: str = ""  # Backward-compatible alias for baseInstructions.
     initialized: bool
     createdAt: str
     updatedAt: str
     lastSentAt: str | None = None
     cooldownUntil: str | None = None
     rateLimitCount: int = 0
+    currentTaskId: str | None = None
     tabAvailable: bool | None = None
 
 
@@ -110,3 +120,36 @@ class AgentDispatchOutput(BaseModel):
     retryAfterSeconds: int = 0
     cooldownUntil: str | None = None
     error: str | None = None
+
+
+class AgentTaskOutput(BaseModel):
+    taskId: str
+    agent: str
+    objective: str
+    project: str
+    workingPath: str = ""
+    readScopes: list[str] = Field(default_factory=list)
+    writeScopes: list[str] = Field(default_factory=list)
+    acceptanceCriteria: list[str] = Field(default_factory=list)
+    status: Literal["assigned", "completed", "cancelled", "blocked", "orphaned"]
+    createdAt: str
+    updatedAt: str
+
+
+class AgentTasksOutput(BaseModel):
+    count: int
+    tasks: list[AgentTaskOutput]
+
+
+class PathClaimOutput(BaseModel):
+    path: str
+    agent: str
+    taskId: str | None = None
+    project: str = ""
+    workingPath: str = ""
+    claimedAt: str
+
+
+class PathClaimsOutput(BaseModel):
+    count: int
+    claims: list[PathClaimOutput]

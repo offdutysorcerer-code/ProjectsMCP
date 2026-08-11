@@ -5,6 +5,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from mcp_platform.audit_logging import install_tool_audit
 from mcp_platform.context import PlatformContext
 from mcp_platform.plugin_registry import PluginRegistry
 from services.a3_2_service import A3_2Service
@@ -14,6 +15,7 @@ from services.desktop_service import DesktopService
 from services.file_service import FileService
 from services.git_service import GitService
 from services.line_a23_service import LineA23Service
+from services.local_agent_service import LocalAgentService
 from services.process_service import ProcessService
 
 APP_DIR = Path(__file__).resolve().parent
@@ -21,6 +23,7 @@ CONFIG_PATH = APP_DIR / "config.json"
 ARTIFACTS_DIR = APP_DIR / "artifacts"
 
 mcp = FastMCP("ProjectsMCP Platform")
+install_tool_audit(mcp)
 config_service = ConfigService(CONFIG_PATH)
 file_service = FileService(config_service)
 browser_service = BrowserService(ARTIFACTS_DIR / "browser")
@@ -45,6 +48,12 @@ git_service = GitService(
     process_service,
     default_timeout_seconds=int(settings.get("git_timeout_seconds", 60)),
 )
+local_agent_service = LocalAgentService(
+    file_service=file_service,
+    process_service=process_service,
+    worker_dir=Path(str(settings.get("local_agent_worker_dir", r"D:\AIProjects\A28-Agent2AgentWithLMStudio"))),
+    timeout_seconds=int(settings.get("local_agent_timeout_seconds", 180)),
+)
 context = PlatformContext(
     a3_2_service=a3_2_service,
     config_service=config_service,
@@ -53,6 +62,7 @@ context = PlatformContext(
     desktop_service=desktop_service,
     git_service=git_service,
     line_a23_service=line_a23_service,
+    local_agent_service=local_agent_service,
     process_service=process_service,
 )
 registry = PluginRegistry(context)

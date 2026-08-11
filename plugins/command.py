@@ -17,14 +17,12 @@ class CommandPlugin:
     def register_tools(self, mcp: Any, context: PlatformContext) -> None:
         process_service = context.process_service
 
-        @mcp.tool()
-        def run_command(
+        def _execute_command(
             command: str,
-            shell: str = "cmd",
+            shell: str,
             cwd: str = "",
             timeout_seconds: int | None = None,
         ) -> dict[str, Any]:
-            """Execute a command with bounded output and terminate its process tree on timeout."""
             if not command.strip():
                 return {"status": "error", "ok": False, "message": "Command is required."}
 
@@ -87,18 +85,23 @@ class CommandPlugin:
             }
 
         @mcp.tool()
+        def run_command(
+            command: str,
+            shell: str = "cmd",
+            cwd: str = "",
+            timeout_seconds: int | None = None,
+        ) -> dict[str, Any]:
+            """Execute a command with bounded output and terminate its process tree on timeout."""
+            return _execute_command(command, shell, cwd, timeout_seconds)
+
+        @mcp.tool()
         def run_powershell(
             command: str,
             cwd: str = "",
             timeout_seconds: int | None = None,
         ) -> dict[str, Any]:
             """Execute a non-interactive PowerShell command."""
-            return run_command(
-                command,
-                shell="powershell",
-                cwd=cwd,
-                timeout_seconds=timeout_seconds,
-            )
+            return _execute_command(command, "powershell", cwd, timeout_seconds)
 
         @mcp.tool()
         def run_cmd(
@@ -107,12 +110,7 @@ class CommandPlugin:
             timeout_seconds: int | None = None,
         ) -> dict[str, Any]:
             """Execute a CMD command."""
-            return run_command(
-                command,
-                shell="cmd",
-                cwd=cwd,
-                timeout_seconds=timeout_seconds,
-            )
+            return _execute_command(command, "cmd", cwd, timeout_seconds)
 
 
 def create_plugin() -> CommandPlugin:

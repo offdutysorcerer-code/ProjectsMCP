@@ -86,6 +86,20 @@ class A3_2Service:
             "truncated": len(text) >= max_chars,
         }
 
+    async def execute_javascript(self, tab_id: str, script: str) -> dict[str, Any]:
+        if not script.strip():
+            raise ValueError("script must not be empty")
+        data = await self._request_json(
+            "POST",
+            f"/api/tabs/{tab_id}/javascript",
+            {"script": script},
+        )
+        return {
+            "ok": True,
+            "tabId": tab_id,
+            "result": str(data.get("result", "")),
+        }
+
     async def screenshot(self, tab_id: str) -> dict[str, Any]:
         if self.artifacts_dir is None:
             raise RuntimeError("A3_2 screenshot artifacts directory is not configured.")
@@ -238,6 +252,67 @@ class A3_2Service:
             "error": None,
         }
 
+    async def assign_agent_task(
+        self,
+        name: str,
+        task_id: str,
+        objective: str,
+        project: str,
+        working_path: str = "",
+        read_scopes: list[str] | None = None,
+        write_scopes: list[str] | None = None,
+        acceptance_criteria: list[str] | None = None,
+    ) -> dict[str, Any]:
+        registry = self._require_agent_registry()
+        return await registry.assign_task(
+            name,
+            task_id,
+            objective,
+            project,
+            working_path,
+            read_scopes,
+            write_scopes,
+            acceptance_criteria,
+        )
+
+    async def complete_agent_task(
+        self,
+        name: str,
+        task_id: str,
+        status: str = "completed",
+    ) -> dict[str, Any]:
+        registry = self._require_agent_registry()
+        return await registry.complete_task(name, task_id, status)
+
+    async def list_agent_tasks(self, status: str = "") -> dict[str, Any]:
+        registry = self._require_agent_registry()
+        tasks = await registry.list_tasks(status)
+        return {"count": len(tasks), "tasks": tasks}
+
+    async def claim_agent_paths(
+        self,
+        name: str,
+        paths: list[str],
+        task_id: str = "",
+    ) -> dict[str, Any]:
+        registry = self._require_agent_registry()
+        claims = await registry.claim_paths(name, paths, task_id)
+        return {"count": len(claims), "claims": claims}
+
+    async def release_agent_paths(
+        self,
+        name: str,
+        paths: list[str] | None = None,
+    ) -> dict[str, Any]:
+        registry = self._require_agent_registry()
+        claims = await registry.release_paths(name, paths)
+        return {"count": len(claims), "claims": claims}
+
+    async def list_agent_path_claims(self) -> dict[str, Any]:
+        registry = self._require_agent_registry()
+        claims = await registry.list_claims()
+        return {"count": len(claims), "claims": claims}
+
     def _require_agent_registry(self) -> A3_2AgentRegistry:
         if self.agent_registry is None:
             raise RuntimeError("A3_2 agent registry is not configured.")
@@ -279,13 +354,13 @@ class A3_2Service:
 
     @staticmethod
     def _build_agent_initialization_prompt(agent: dict[str, Any]) -> str:
-        instructions = " ".join(str(agent.get("instructions") or "").split())
+        base_instructions = " ".join(str(agent.get("baseInstructions") or agent.get("instructions") or "").split())
         parts = [
             f"You are {agent['name']}, role: {agent['role']}.",
-            "Follow only tasks from the coordinating agent, stay within scope, and do not recursively invoke other agents.",
+            "Follow only tasks from the coordinating agent, stay within the scope defined by each task, and do not recursively invoke other agents.",
         ]
-        if instructions:
-            parts.append(instructions)
+        if base_instructions:
+            parts.append(base_instructions)
         parts.append("Reply exactly AGENT_READY.")
         return " ".join(parts)
 

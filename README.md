@@ -165,16 +165,26 @@ Agent registry/orchestration tools:
 - `a3_2_register_agent(name, role, tab_id, instructions="")`
 - `a3_2_list_agents()`
 - `a3_2_unregister_agent(name)`
+- `a3_2_assign_agent_task(name, task_id, objective, project, working_path="", read_scopes=None, write_scopes=None, acceptance_criteria=None)`
+- `a3_2_complete_agent_task(name, task_id, status="completed")`
+- `a3_2_list_agent_tasks(status="")`
+- `a3_2_claim_agent_paths(name, paths, task_id="")`
+- `a3_2_release_agent_paths(name, paths=None)`
+- `a3_2_list_agent_path_claims()`
 - `a3_2_initialize_agent(name, timeout_seconds=120)`
 - `a3_2_send_to_agent(name, message, timeout_seconds=120)`
 
-The agent registry is stored locally under `artifacts/a3_2/agents.json`, which is excluded from Git. Registration maps a logical agent name and role to an A3_2 GUID `tabId`. A tab ID is stable during one A3_2 process but is currently recreated after an A3_2 restart, so logical agents must be rebound to the new tab IDs after restart. Rebinding to a different tab automatically clears the `initialized` flag.
+The agent registry is stored locally under `artifacts/a3_2/agents.json`, which is excluded from Git. Registration maps a logical agent name and role to an A3_2 GUID `tabId`. The existing `instructions` argument is retained for connector compatibility but is treated as long-lived **base instructions**, not task-specific scope. Registry output exposes both `baseInstructions` and the legacy `instructions` alias. Project, working path, read/write scopes, objective, and acceptance criteria belong to an assigned task instead.
+
+The same registry file also stores orchestration tasks and cooperative path claims. An agent can have one active assigned task. Path claims are scoped by the task's `project` and `workingPath`; overlapping paths claimed by another agent in the same task workspace are rejected. Completing, cancelling, or blocking a task automatically releases claims associated with that task. Claims are coordination guards, not filesystem locks or write-permission enforcement.
+
+A tab ID is stable during one A3_2 process but is currently recreated after an A3_2 restart, so logical agents must be rebound to the new tab IDs after restart. Rebinding to a different tab automatically clears the `initialized` flag.
 
 Agent dispatch has two safety layers: a per-agent cooldown and a global ChatGPT cooldown shared by all registered agents. Normal sends enforce a minimum interval. If any A3_2 tab reports the ChatGPT rate-limit dialog, A0 stops further agent dispatch and applies exponential backoff of 5, 10, 20, then up to 30 minutes. `a3_2_initialize_agent` and `a3_2_send_to_agent` return structured `status`, `retryAfterSeconds`, and `cooldownUntil` fields instead of automatically retrying.
 
 The ChatGPT send tool delegates browser-native input, submission, rate-limit detection, final-response confirmation, and assistant-message extraction to A3_2. A3_2 reports rate limiting as HTTP 429; the A0 adapter converts it into structured MCP results where appropriate.
 
-All `a3_2_*` MCP tools opt into FastMCP structured output and declare Pydantic return contracts, so ChatGPT receives a concrete `outputSchema` for tab lists, ChatGPT messages, agent state, dispatch results, and cooldown/rate-limit responses.
+All `a3_2_*` MCP tools opt into FastMCP structured output and declare Pydantic return contracts, so ChatGPT receives a concrete `outputSchema` for tab lists, ChatGPT messages, agent state, dispatch results, and cooldown/rate-limit responses. MCP `structuredContent` must be a JSON object, so list-style results are wrapped as objects: `a3_2_list_tabs()` returns `{ count, tabs }` and `a3_2_chatgpt_get_messages()` returns `{ count, messages }` instead of top-level arrays.
 
 ## LINE A23 proxy plugin
 
@@ -220,10 +230,10 @@ Local SSE endpoint:
 http://127.0.0.1:8090/sse
 ```
 
-Expose it to ChatGPT with ngrok or another tunnel:
+Expose it to ChatGPT with a separate tunnel project:
 
 ```text
-https://YOUR-NGROK-DOMAIN/sse
+ngrok: use A0_3-ProjectsMCP_Ngrok`r`nCloudflare: use A0_1/A0_2 ProjectsMCP Cloudflare Tunnel
 ```
 
 After changing Python files, restart `StartProjectsMCP.bat`, then refresh the connector in ChatGPT.
@@ -329,10 +339,9 @@ ProjectsMCP 是一個以 Plugin 為核心的 MCP Platform，目標是將各種�
 ## 快速開始
 
 1. 安裝任一可用的 Python；Setup 會透過 uv 自動準備並固定使用 Python 3.13，以符合 MCP 套件需求。
-2. 執行 `SetupProjectsMCP.bat`。它會自動安裝 uv、Python 套件、Playwright Chromium 與 ngrok；若尚未設定 ngrok，會要求輸入 authtoken。
-3. 安裝完成後可直接選擇啟動 ProjectsMCP 與 ngrok tunnel，也可日後分別執行 `StartProjectsMCP.bat`、`StartNgrokMCP.bat`。
-4. Setup 會保留現有 PATH，補入 WindowsApps 與 WinGet Links，並搜尋 WinGet portable package 目錄。若 WinGet 的 ngrok 安裝失敗，Setup 會重設並更新 WinGet source 後重試一次。
-5. Setup 找到 ngrok 後會執行官方 agent 更新並驗證設定檔，避免過舊 agent 或不相容設定在啟動 tunnel 時才失敗。
+2. 執行 `SetupProjectsMCP.bat`。它只會準備本機 ProjectsMCP 所需的 uv、Python 套件與 Playwright Chromium。
+3. 安裝完成後可直接啟動 `StartProjectsMCP.bat`。若需要 ngrok，請另外使用 `A0_3-ProjectsMCP_Ngrok`。
+4. Internet tunnel 已從 A0 分離：ngrok 使用 A0_3；Cloudflare Named Tunnel 使用 A0_1/A0_2。
 
 ## 專案目標
 
@@ -386,7 +395,7 @@ After extraction on another Windows computer:
 1. Review `config.json` and update project root paths for that computer.
 2. Run `SetupProjectsMCP.bat` to install Python dependencies and Playwright Chromium.
 3. Run `StartProjectsMCP.bat`.
-4. Run `StartNgrokMCP.bat` only when a tunnel is required.
+4. If Internet access is required, use the separate A0_3 ngrok project or A0_1/A0_2 Cloudflare tunnel project.
 
 A fresh browser profile will be created automatically under `artifacts/browser_profile`. Existing login sessions, cookies, and browser extensions are not part of the portable package.
 
@@ -399,3 +408,4 @@ A fresh browser profile will be created automatically under `artifacts/browser_p
 - `attachment_storage_info`：查看來源目錄、目的目錄、傳輸方式與檔案大小上限。
 
 附件工具接受所有檔案類型，預設單檔上限為 1 GiB。複製時會先寫入 `.part` 檔並計算 SHA-256，成功後才原子替換正式檔案；來源與目的路徑都會限制在設定目錄內，並阻擋路徑穿越與符號連結來源。
+
