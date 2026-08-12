@@ -438,3 +438,15 @@ The `runtime_telemetry` plugin exposes:
 - `runtime_recent_events(limit=100)` — recent normalized events.
 
 Current producers include MCP tool audit events (`tool.started/completed/failed/cancelled`), Local Agent queue/dispatch/execution lifecycle events, and A3_2 agent/task/path-claim events. The schema is intentionally backend-neutral so A28 LM Studio workers, A3_2 ChatGPT agents, and future workers can appear in one Control Center.
+
+## A0 Control Center
+
+`A0.ControlCenter` is a read-only WPF + WebView2 dashboard for runtime orchestration telemetry. It reads `artifacts/runtime/state.json` and the latest JSONL event files directly, so the dashboard remains independent from the MCP request path.
+
+Run:
+
+```bat
+StartA0ControlCenter.bat
+```
+
+The first version shows work queue/tasks, agents/workers, active resource claims, MCP tool activity, dispatch records, and recent runtime events. It refreshes once per second by default and does not expose cancel/retry/release or other mutating operations.

@@ -26,3 +26,7 @@ Thumbs.db
 .env
 .env.*
 *.local.json
+
+# .NET build output
+bin/
+obj/

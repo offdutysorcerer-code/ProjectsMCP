@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>A0 Control Center</title>
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="brand">A0 Control Center</div>
+    <div class="sub">MCP / Agent / Work Orchestration Runtime Monitor</div>
+  </div>
+  <div class="top-actions">
+    <span id="connection" class="status-pill">Loading</span>
+    <label class="switch"><input id="autoRefresh" type="checkbox" checked><span>Auto</span></label>
+    <button id="refresh">重新整理</button>
+  </div>
+</header>
+<main class="page">
+  <section id="summary" class="summary"></section>
+  <section class="section">
+    <div class="section-title"><div><h2>Work Queue / Tasks</h2><p>排隊、執行、等待與完成中的工作</p></div><span id="taskCount" class="count"></span></div>
+    <div class="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Project / Path</th><th>Objective</th><th>Updated</th></tr></thead><tbody id="tasks"></tbody></table></div>
+  </section>
+  <div class="split">
+    <section class="section"><div class="section-title"><div><h2>Agents / Workers</h2><p>Agent 狀態與目前工作</p></div></div><div id="agents" class="cards"></div></section>
+    <section class="section"><div class="section-title"><div><h2>Claims / Mutex</h2><p>資源占用與互斥狀態</p></div></div><div id="claims" class="cards"></div></section>
+  </div>
+  <section class="section">
+    <div class="section-title"><div><h2>Tool Activity</h2><p>MCP 工具執行、耗時與錯誤</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Status</th><th>Task / Agent</th><th>Duration</th><th>Started</th><th>Result / Error</th></tr></thead><tbody id="tools"></tbody></table></div>
+  </section>
+  <section class="section">
+    <div class="section-title"><div><h2>Dispatch</h2><p>工作從協調者交派到 Agent 的紀錄</p></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>From</th><th>To</th><th>Backend</th><th>Updated</th></tr></thead><tbody id="dispatches"></tbody></table></div>
+  </section>
+  <section class="section">
+    <div class="section-title"><div><h2>Recent Events</h2><p>Runtime telemetry event stream</p></div><span id="eventCount" class="count"></span></div>
+    <div id="events" class="events"></div>
+  </section>
+</main>
+<footer class="footer"><span id="runtimePath"></span><span id="updatedAt"></span></footer>
+<script src="/scripts/app.js"></script>
+</body>
+</html>
