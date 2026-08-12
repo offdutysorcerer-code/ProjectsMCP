@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -32,21 +33,28 @@ class LocalAgentService:
         self.token_file = self.worker_dir / "token.txt"
         self.tasks_dir = self.worker_dir / "tasks"
         self.results_dir = self.tasks_dir / "results"
+        self.worktrees_dir = self.worker_dir / "worktrees"
         self.timeout_seconds = max(10, int(timeout_seconds))
         self.max_concurrent_jobs = max(1, int(max_concurrent_jobs))
         self.telemetry = telemetry
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.worktrees_dir.mkdir(parents=True, exist_ok=True)
         self._executor = ThreadPoolExecutor(
             max_workers=self.max_concurrent_jobs,
             thread_name_prefix="local-agent",
         )
         self._jobs: dict[str, Future[dict[str, Any]]] = {}
         self._jobs_lock = threading.Lock()
+        self._source_locks_guard = threading.Lock()
+        self._source_locks: dict[str, threading.Lock] = {}
+        self._source_claims: dict[str, dict[str, str]] = {}
 
     def status(self) -> dict[str, Any]:
         with self._jobs_lock:
             active_jobs = sum(1 for future in self._jobs.values() if not future.done())
+        with self._source_locks_guard:
+            source_claims = list(self._source_claims.values())
         return {
             "ok": self.worker_script.is_file() and self.token_file.is_file(),
             "backend": "lmstudio",
@@ -57,6 +65,8 @@ class LocalAgentService:
             "token_exists": self.token_file.is_file(),
             "max_concurrent_jobs": self.max_concurrent_jobs,
             "active_jobs": active_jobs,
+            "active_source_claims": len(source_claims),
+            "source_claims": source_claims,
         }
 
     def submit_task(
@@ -212,8 +222,8 @@ class LocalAgentService:
         if not criteria:
             raise ValueError("acceptance_criteria must contain at least one item")
 
-        source_file = self.file_service.resolve_project_path(project, source_path)
-        if not source_file.is_file():
+        original_source_file = self.file_service.resolve_project_path(project, source_path)
+        if not original_source_file.is_file():
             raise FileNotFoundError(f"Source file not found: {source_path}")
         if not self.worker_script.is_file():
             raise FileNotFoundError(f"Local coding worker not found: {self.worker_script}")
@@ -221,86 +231,199 @@ class LocalAgentService:
             raise FileNotFoundError(f"LM Studio token file not found: {self.token_file}")
 
         normalized_task_id = self._task_id(task_id or f"local-{uuid.uuid4().hex[:12]}")
-        self._emit(
-            "task.started",
-            task_id=normalized_task_id,
-            agent_id="localdeveloper",
-            data={"startedAt": self._now(), "backend": "lmstudio"},
-        )
-        self._emit(
-            "agent.busy",
-            agent_id="localdeveloper",
-            data={"name": "LocalDeveloper", "type": "local_agent", "backend": "lmstudio", "currentTaskId": normalized_task_id},
-        )
-        task_file = self.tasks_dir / f"{normalized_task_id}.json"
-        payload = {
-            "task_id": normalized_task_id,
-            "source_file": str(source_file),
-            "objective": objective,
-            "acceptance_criteria": criteria,
-            "constraints": [str(x).strip() for x in (constraints or []) if str(x).strip()],
-            "max_changed_lines": max(1, int(max_changed_lines)),
-            "validation_command": validation_command.strip(),
-        }
-        task_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+        claim_key = str(original_source_file.resolve()).casefold()
+        source_lock = self._get_source_lock(claim_key)
 
-        timeout = self.timeout_seconds if timeout_seconds is None else max(10, int(timeout_seconds))
+        with source_lock:
+            self._set_source_claim(claim_key, normalized_task_id, original_source_file)
+            worktree_dir: Path | None = None
+            repo_root: Path | None = None
+            try:
+                repo_root = self._git_repo_root(original_source_file)
+                self._require_clean_repo(repo_root)
+                worktree_dir = self._create_worktree(repo_root, normalized_task_id)
+                relative_source = original_source_file.resolve().relative_to(repo_root.resolve())
+                source_file = (worktree_dir / relative_source).resolve()
+                if not source_file.is_file():
+                    raise FileNotFoundError(f"Isolated source file not found: {relative_source}")
+
+                self._emit(
+                    "task.started",
+                    task_id=normalized_task_id,
+                    agent_id="localdeveloper",
+                    data={
+                        "startedAt": self._now(),
+                        "backend": "lmstudio",
+                        "worktreeDir": str(worktree_dir),
+                        "sourceClaim": str(original_source_file),
+                    },
+                )
+                self._emit(
+                    "agent.busy",
+                    agent_id="localdeveloper",
+                    data={"name": "LocalDeveloper", "type": "local_agent", "backend": "lmstudio", "currentTaskId": normalized_task_id},
+                )
+                task_file = self.tasks_dir / f"{normalized_task_id}.json"
+                payload = {
+                    "task_id": normalized_task_id,
+                    "source_file": str(source_file),
+                    "original_source_file": str(original_source_file),
+                    "worktree_dir": str(worktree_dir),
+                    "repo_root": str(repo_root),
+                    "objective": objective,
+                    "acceptance_criteria": criteria,
+                    "constraints": [str(x).strip() for x in (constraints or []) if str(x).strip()],
+                    "max_changed_lines": max(1, int(max_changed_lines)),
+                    "validation_command": validation_command.strip(),
+                }
+                task_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+
+                timeout = self.timeout_seconds if timeout_seconds is None else max(10, int(timeout_seconds))
+                run = self.process_service.run(
+                    [
+                        "powershell.exe",
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(self.worker_script),
+                        "-TaskFile",
+                        str(task_file),
+                    ],
+                    cwd=self.worker_dir,
+                    timeout_seconds=timeout,
+                )
+                if not run.get("ok"):
+                    return {
+                        "ok": False,
+                        "status": "worker_failed",
+                        "agent": "LocalDeveloper",
+                        "task_id": normalized_task_id,
+                        "task_file": str(task_file),
+                        "worktree_dir": str(worktree_dir),
+                        "process": run,
+                    }
+
+                stdout = str(run.get("stdout") or "").strip()
+                try:
+                    result = json.loads(stdout)
+                except json.JSONDecodeError as exc:
+                    return {
+                        "ok": False,
+                        "status": "invalid_worker_output",
+                        "agent": "LocalDeveloper",
+                        "task_id": normalized_task_id,
+                        "task_file": str(task_file),
+                        "worktree_dir": str(worktree_dir),
+                        "process": run,
+                        "error": str(exc),
+                    }
+
+                diff_file = Path(str(result.get("diff_file") or ""))
+                diff_text = ""
+                if diff_file.is_file():
+                    diff_text = diff_file.read_text(encoding="utf-8")
+                    if len(diff_text) > 30000:
+                        diff_text = diff_text[:30000] + "\n[diff truncated]"
+
+                return {
+                    "ok": bool(result.get("overall_pass")),
+                    "status": "passed" if result.get("overall_pass") else "validation_failed",
+                    "agent": "LocalDeveloper",
+                    "task_id": normalized_task_id,
+                    "task_file": str(task_file),
+                    "worktree_dir": str(worktree_dir),
+                    "repo_root": str(repo_root),
+                    "original_source_file": str(original_source_file),
+                    "result": result,
+                    "diff": diff_text,
+                }
+            finally:
+                if worktree_dir is not None and repo_root is not None:
+                    self._remove_worktree(repo_root, worktree_dir)
+                self._clear_source_claim(claim_key, normalized_task_id)
+
+    def _get_source_lock(self, claim_key: str) -> threading.Lock:
+        with self._source_locks_guard:
+            return self._source_locks.setdefault(claim_key, threading.Lock())
+
+    def _set_source_claim(self, claim_key: str, task_id: str, source_file: Path) -> None:
+        with self._source_locks_guard:
+            self._source_claims[claim_key] = {
+                "task_id": task_id,
+                "source_file": str(source_file),
+            }
+
+    def _clear_source_claim(self, claim_key: str, task_id: str) -> None:
+        with self._source_locks_guard:
+            claim = self._source_claims.get(claim_key)
+            if claim is not None and claim.get("task_id") == task_id:
+                self._source_claims.pop(claim_key, None)
+
+    def _git_repo_root(self, source_file: Path) -> Path:
         run = self.process_service.run(
-            [
-                "powershell.exe",
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(self.worker_script),
-                "-TaskFile",
-                str(task_file),
-            ],
-            cwd=self.worker_dir,
-            timeout_seconds=timeout,
+            ["git", "-C", str(source_file.parent), "rev-parse", "--show-toplevel"],
+            cwd=source_file.parent,
+            timeout_seconds=15,
         )
         if not run.get("ok"):
-            return {
-                "ok": False,
-                "status": "worker_failed",
-                "agent": "LocalDeveloper",
-                "task_id": normalized_task_id,
-                "task_file": str(task_file),
-                "process": run,
-            }
+            raise RuntimeError(f"Source file is not inside a usable Git repository: {source_file}")
+        value = str(run.get("stdout") or "").strip()
+        if not value:
+            raise RuntimeError(f"Git repository root could not be resolved for: {source_file}")
+        return Path(value).resolve()
 
-        stdout = str(run.get("stdout") or "").strip()
+    def _require_clean_repo(self, repo_root: Path) -> None:
+        run = self.process_service.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            cwd=repo_root,
+            timeout_seconds=15,
+        )
+        if not run.get("ok"):
+            raise RuntimeError(f"Unable to inspect Git status: {repo_root}")
+        dirty = str(run.get("stdout") or "").strip()
+        if dirty:
+            raise RuntimeError(
+                "LocalDeveloper isolated worktree requires a clean source repository. "
+                f"Commit/stash current changes first: {repo_root}"
+            )
+
+    def _create_worktree(self, repo_root: Path, task_id: str) -> Path:
+        worktree_dir = (self.worktrees_dir / task_id).resolve()
+        if worktree_dir.exists():
+            self._remove_worktree(repo_root, worktree_dir)
+            if worktree_dir.exists():
+                shutil.rmtree(worktree_dir, ignore_errors=True)
+        run = self.process_service.run(
+            ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(worktree_dir), "HEAD"],
+            cwd=repo_root,
+            timeout_seconds=60,
+        )
+        if not run.get("ok"):
+            raise RuntimeError(f"Unable to create isolated Git worktree for {task_id}: {run.get('stderr') or run.get('stdout')}")
+        return worktree_dir
+
+    def _remove_worktree(self, repo_root: Path, worktree_dir: Path) -> None:
         try:
-            result = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            return {
-                "ok": False,
-                "status": "invalid_worker_output",
-                "agent": "LocalDeveloper",
-                "task_id": normalized_task_id,
-                "task_file": str(task_file),
-                "process": run,
-                "error": str(exc),
-            }
-
-        diff_file = Path(str(result.get("diff_file") or ""))
-        diff_text = ""
-        if diff_file.is_file():
-            diff_text = diff_file.read_text(encoding="utf-8")
-            if len(diff_text) > 30000:
-                diff_text = diff_text[:30000] + "\n[diff truncated]"
-
-        return {
-            "ok": bool(result.get("overall_pass")),
-            "status": "passed" if result.get("overall_pass") else "validation_failed",
-            "agent": "LocalDeveloper",
-            "task_id": normalized_task_id,
-            "task_file": str(task_file),
-            "result": result,
-            "diff": diff_text,
-        }
+            self.process_service.run(
+                ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)],
+                cwd=repo_root,
+                timeout_seconds=30,
+            )
+        except Exception:
+            pass
+        if worktree_dir.exists():
+            shutil.rmtree(worktree_dir, ignore_errors=True)
+        try:
+            self.process_service.run(
+                ["git", "-C", str(repo_root), "worktree", "prune"],
+                cwd=repo_root,
+                timeout_seconds=15,
+            )
+        except Exception:
+            pass
 
     def _persist_future_result(self, task_id: str, future: Future[dict[str, Any]]) -> None:
         result = self._future_result(future, task_id)
