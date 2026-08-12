@@ -68,6 +68,7 @@ class LocalAgentService:
         self._scheduler_condition = threading.Condition()
         self._scheduler_active_cost = 0
         self._scheduler_active: dict[str, dict[str, Any]] = {}
+        self.scheduler_parallel_limit = min(3, self.max_concurrent_jobs)
 
     def status(self) -> dict[str, Any]:
         with self._jobs_lock:
@@ -92,6 +93,7 @@ class LocalAgentService:
             "source_claims": source_claims,
             "scheduler": {
                 "capacity": self._scheduler_capacity(memory),
+                "parallel_limit": self.scheduler_parallel_limit,
                 "active_cost": scheduler_active_cost,
                 "active": scheduler_active,
                 "memory": memory,
@@ -455,7 +457,10 @@ class LocalAgentService:
                 memory = self._memory_snapshot()
                 capacity = self._scheduler_capacity(memory)
                 effective_cost = min(task_cost, self.max_concurrent_jobs)
-                if self._scheduler_active_cost + effective_cost <= capacity:
+                if (
+                    len(self._scheduler_active) < self.scheduler_parallel_limit
+                    and self._scheduler_active_cost + effective_cost <= capacity
+                ):
                     self._scheduler_active_cost += effective_cost
                     self._scheduler_active[task_id] = {
                         "task_id": task_id,
