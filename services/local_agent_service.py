@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import re
 import shutil
 import threading
+import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -12,6 +14,20 @@ from typing import Any
 
 from services.file_service import FileService
 from services.process_service import ProcessService
+
+
+class _MemoryStatusEx(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
 
 
 class LocalAgentService:
@@ -49,12 +65,19 @@ class LocalAgentService:
         self._source_locks_guard = threading.Lock()
         self._source_locks: dict[str, threading.Lock] = {}
         self._source_claims: dict[str, dict[str, str]] = {}
+        self._scheduler_condition = threading.Condition()
+        self._scheduler_active_cost = 0
+        self._scheduler_active: dict[str, dict[str, Any]] = {}
 
     def status(self) -> dict[str, Any]:
         with self._jobs_lock:
             active_jobs = sum(1 for future in self._jobs.values() if not future.done())
         with self._source_locks_guard:
             source_claims = list(self._source_claims.values())
+        memory = self._memory_snapshot()
+        with self._scheduler_condition:
+            scheduler_active = list(self._scheduler_active.values())
+            scheduler_active_cost = self._scheduler_active_cost
         return {
             "ok": self.worker_script.is_file() and self.token_file.is_file(),
             "backend": "lmstudio",
@@ -67,6 +90,12 @@ class LocalAgentService:
             "active_jobs": active_jobs,
             "active_source_claims": len(source_claims),
             "source_claims": source_claims,
+            "scheduler": {
+                "capacity": self._scheduler_capacity(memory),
+                "active_cost": scheduler_active_cost,
+                "active": scheduler_active,
+                "memory": memory,
+            },
         }
 
     def submit_task(
@@ -231,6 +260,50 @@ class LocalAgentService:
             raise FileNotFoundError(f"LM Studio token file not found: {self.token_file}")
 
         normalized_task_id = self._task_id(task_id or f"local-{uuid.uuid4().hex[:12]}")
+        source_bytes = original_source_file.stat().st_size
+        task_class, task_cost = self._classify_task(source_bytes)
+        scheduler_wait_seconds = self._acquire_scheduler_slot(
+            normalized_task_id,
+            task_class=task_class,
+            task_cost=task_cost,
+            source_bytes=source_bytes,
+        )
+        try:
+            return self._run_task_isolated(
+                project=project,
+                source_path=source_path,
+                objective=objective,
+                criteria=criteria,
+                constraints=constraints,
+                normalized_task_id=normalized_task_id,
+                max_changed_lines=max_changed_lines,
+                validation_command=validation_command,
+                timeout_seconds=timeout_seconds,
+                original_source_file=original_source_file,
+                task_class=task_class,
+                task_cost=task_cost,
+                scheduler_wait_seconds=scheduler_wait_seconds,
+            )
+        finally:
+            self._release_scheduler_slot(normalized_task_id)
+
+    def _run_task_isolated(
+        self,
+        *,
+        project: str,
+        source_path: str,
+        objective: str,
+        criteria: list[str],
+        constraints: list[str] | None,
+        normalized_task_id: str,
+        max_changed_lines: int,
+        validation_command: str,
+        timeout_seconds: int | None,
+        original_source_file: Path,
+        task_class: str,
+        task_cost: int,
+        scheduler_wait_seconds: float,
+    ) -> dict[str, Any]:
         claim_key = str(original_source_file.resolve()).casefold()
         source_lock = self._get_source_lock(claim_key)
 
@@ -256,6 +329,9 @@ class LocalAgentService:
                         "backend": "lmstudio",
                         "worktreeDir": str(worktree_dir),
                         "sourceClaim": str(original_source_file),
+                        "schedulerClass": task_class,
+                        "schedulerCost": task_cost,
+                        "schedulerWaitSeconds": scheduler_wait_seconds,
                     },
                 )
                 self._emit(
@@ -275,6 +351,9 @@ class LocalAgentService:
                     "constraints": [str(x).strip() for x in (constraints or []) if str(x).strip()],
                     "max_changed_lines": max(1, int(max_changed_lines)),
                     "validation_command": validation_command.strip(),
+                    "scheduler_class": task_class,
+                    "scheduler_cost": task_cost,
+                    "scheduler_wait_seconds": scheduler_wait_seconds,
                 }
                 task_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
 
@@ -303,6 +382,9 @@ class LocalAgentService:
                         "task_id": normalized_task_id,
                         "task_file": str(task_file),
                         "worktree_dir": str(worktree_dir),
+                        "scheduler_class": task_class,
+                        "scheduler_cost": task_cost,
+                        "scheduler_wait_seconds": scheduler_wait_seconds,
                         "process": run,
                     }
 
@@ -317,6 +399,9 @@ class LocalAgentService:
                         "task_id": normalized_task_id,
                         "task_file": str(task_file),
                         "worktree_dir": str(worktree_dir),
+                        "scheduler_class": task_class,
+                        "scheduler_cost": task_cost,
+                        "scheduler_wait_seconds": scheduler_wait_seconds,
                         "process": run,
                         "error": str(exc),
                     }
@@ -337,6 +422,9 @@ class LocalAgentService:
                     "worktree_dir": str(worktree_dir),
                     "repo_root": str(repo_root),
                     "original_source_file": str(original_source_file),
+                    "scheduler_class": task_class,
+                    "scheduler_cost": task_cost,
+                    "scheduler_wait_seconds": scheduler_wait_seconds,
                     "result": result,
                     "diff": diff_text,
                 }
@@ -344,6 +432,86 @@ class LocalAgentService:
                 if worktree_dir is not None and repo_root is not None:
                     self._remove_worktree(repo_root, worktree_dir)
                 self._clear_source_claim(claim_key, normalized_task_id)
+
+    @staticmethod
+    def _classify_task(source_bytes: int) -> tuple[str, int]:
+        if source_bytes <= 8 * 1024:
+            return "small", 1
+        if source_bytes <= 24 * 1024:
+            return "medium", 2
+        return "large", 4
+
+    def _acquire_scheduler_slot(
+        self,
+        task_id: str,
+        *,
+        task_class: str,
+        task_cost: int,
+        source_bytes: int,
+    ) -> float:
+        started = time.monotonic()
+        with self._scheduler_condition:
+            while True:
+                memory = self._memory_snapshot()
+                capacity = self._scheduler_capacity(memory)
+                effective_cost = min(task_cost, self.max_concurrent_jobs)
+                if self._scheduler_active_cost + effective_cost <= capacity:
+                    self._scheduler_active_cost += effective_cost
+                    self._scheduler_active[task_id] = {
+                        "task_id": task_id,
+                        "class": task_class,
+                        "cost": effective_cost,
+                        "source_bytes": source_bytes,
+                        "admitted_at": self._now(),
+                    }
+                    return round(time.monotonic() - started, 3)
+                self._scheduler_condition.wait(timeout=1.0)
+
+    def _release_scheduler_slot(self, task_id: str) -> None:
+        with self._scheduler_condition:
+            active = self._scheduler_active.pop(task_id, None)
+            if active is not None:
+                self._scheduler_active_cost = max(0, self._scheduler_active_cost - int(active.get("cost") or 0))
+            self._scheduler_condition.notify_all()
+
+    def _scheduler_capacity(self, memory: dict[str, Any] | None = None) -> int:
+        hard_max = self.max_concurrent_jobs
+        memory = memory or self._memory_snapshot()
+        headroom_gb = memory.get("headroom_gb")
+        if not isinstance(headroom_gb, (int, float)):
+            return hard_max
+        if headroom_gb < 8:
+            return 1
+        if headroom_gb < 16:
+            return min(hard_max, 2)
+        if headroom_gb < 32:
+            return min(hard_max, 3)
+        return hard_max
+
+    @staticmethod
+    def _memory_snapshot() -> dict[str, Any]:
+        if hasattr(ctypes, "windll"):
+            try:
+                status = _MemoryStatusEx()
+                status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                    gib = float(1024**3)
+                    available_phys_gb = status.ullAvailPhys / gib
+                    available_commit_gb = status.ullAvailPageFile / gib
+                    return {
+                        "available_physical_gb": round(available_phys_gb, 2),
+                        "available_commit_gb": round(available_commit_gb, 2),
+                        "memory_load_percent": int(status.dwMemoryLoad),
+                        "headroom_gb": round(min(available_phys_gb, available_commit_gb), 2),
+                    }
+            except Exception:
+                pass
+        return {
+            "available_physical_gb": None,
+            "available_commit_gb": None,
+            "memory_load_percent": None,
+            "headroom_gb": None,
+        }
 
     def _get_source_lock(self, claim_key: str) -> threading.Lock:
         with self._source_locks_guard:
