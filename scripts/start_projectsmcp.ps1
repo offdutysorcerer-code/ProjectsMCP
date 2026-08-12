@@ -90,7 +90,48 @@ Write-LoggedLine "INFO" "ProjectsMCP launcher started."
 Write-LoggedLine "INFO" "Log file: $logPath"
 Write-LoggedLine "INFO" "Endpoint: http://${HostAddress}:$Port/sse"
 
+function Get-PortListenerInfo {
+    param([int]$LocalPort)
+
+    $listener = Get-NetTCPConnection -LocalPort $LocalPort -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $listener) {
+        return $null
+    }
+
+    $processId = [int]$listener.OwningProcess
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+    return [pscustomobject]@{
+        Pid = $processId
+        Name = if ($null -ne $process) { $process.Name } else { "unknown" }
+        CommandLine = if ($null -ne $process) { [string]$process.CommandLine } else { "" }
+    }
+}
+
 try {
+    $existingListener = Get-PortListenerInfo -LocalPort $Port
+    if ($null -ne $existingListener) {
+        $commandLine = $existingListener.CommandLine
+        $isProjectsMcp =
+            $commandLine -match '(?i)mcp-proxy(?:\.exe)?' -and
+            $commandLine -match ('(?i)(?:--port\s+|--port=)' + [regex]::Escape([string]$Port)) -and
+            $commandLine -match '(?i)server\.py'
+
+        if ($isProjectsMcp) {
+            Write-LoggedLine "INFO" "ProjectsMCP is already running on ${HostAddress}:$Port (PID $($existingListener.Pid))."
+            Write-LoggedLine "INFO" "No second instance will be started."
+            exit 0
+        }
+
+        Write-LoggedLine "ERROR" "Port $Port is already in use by another process."
+        Write-LoggedLine "ERROR" "PID: $($existingListener.Pid); Process: $($existingListener.Name)"
+        if ($commandLine) {
+            Write-LoggedLine "ERROR" "Command line: $commandLine"
+        }
+        Write-LoggedLine "ERROR" "ProjectsMCP was not started."
+        exit 3
+    }
+
     $uvCommand = Find-UvCommand
     if ($null -eq $uvCommand) {
         Write-LoggedLine "ERROR" "uv is not installed or cannot be found."
