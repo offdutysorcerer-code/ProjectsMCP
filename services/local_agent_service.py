@@ -5,6 +5,7 @@ import re
 import threading
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ class LocalAgentService:
         worker_dir: Path,
         timeout_seconds: int = 180,
         max_concurrent_jobs: int = 4,
+        telemetry: Any | None = None,
     ) -> None:
         self.file_service = file_service
         self.process_service = process_service
@@ -32,6 +34,7 @@ class LocalAgentService:
         self.results_dir = self.tasks_dir / "results"
         self.timeout_seconds = max(10, int(timeout_seconds))
         self.max_concurrent_jobs = max(1, int(max_concurrent_jobs))
+        self.telemetry = telemetry
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self._executor = ThreadPoolExecutor(
@@ -91,6 +94,32 @@ class LocalAgentService:
             future.add_done_callback(
                 lambda completed, tid=normalized_task_id: self._persist_future_result(tid, completed)
             )
+
+        self._emit(
+            "task.queued",
+            task_id=normalized_task_id,
+            agent_id="localdeveloper",
+            data={
+                "title": objective[:120],
+                "objective": objective,
+                "project": project,
+                "workingPath": source_path,
+                "assignedTo": "localdeveloper",
+                "backend": "lmstudio",
+                "queuedAt": self._now(),
+            },
+        )
+        self._emit(
+            "dispatch.accepted",
+            task_id=normalized_task_id,
+            agent_id="localdeveloper",
+            data={
+                "dispatchId": f"dispatch-{normalized_task_id}",
+                "fromAgentId": "mcp-client",
+                "toAgentId": "localdeveloper",
+                "backend": "lmstudio",
+            },
+        )
 
         return {
             "ok": True,
@@ -192,6 +221,17 @@ class LocalAgentService:
             raise FileNotFoundError(f"LM Studio token file not found: {self.token_file}")
 
         normalized_task_id = self._task_id(task_id or f"local-{uuid.uuid4().hex[:12]}")
+        self._emit(
+            "task.started",
+            task_id=normalized_task_id,
+            agent_id="localdeveloper",
+            data={"startedAt": self._now(), "backend": "lmstudio"},
+        )
+        self._emit(
+            "agent.busy",
+            agent_id="localdeveloper",
+            data={"name": "LocalDeveloper", "type": "local_agent", "backend": "lmstudio", "currentTaskId": normalized_task_id},
+        )
         task_file = self.tasks_dir / f"{normalized_task_id}.json"
         payload = {
             "task_id": normalized_task_id,
@@ -264,6 +304,19 @@ class LocalAgentService:
 
     def _persist_future_result(self, task_id: str, future: Future[dict[str, Any]]) -> None:
         result = self._future_result(future, task_id)
+        final_event = "task.completed" if result.get("ok") else "task.failed"
+        self._emit(
+            final_event,
+            task_id=task_id,
+            agent_id="localdeveloper",
+            severity="info" if result.get("ok") else "error",
+            data={"completedAt": self._now(), "resultStatus": result.get("status")},
+        )
+        self._emit(
+            "agent.idle",
+            agent_id="localdeveloper",
+            data={"name": "LocalDeveloper", "type": "local_agent", "backend": "lmstudio", "currentTaskId": None},
+        )
         result_file = self.results_dir / f"{task_id}.json"
         temp = result_file.with_suffix(".json.tmp")
         try:
@@ -294,6 +347,33 @@ class LocalAgentService:
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
+
+    def _emit(
+        self,
+        event_type: str,
+        *,
+        severity: str = "info",
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        if self.telemetry is None:
+            return
+        try:
+            self.telemetry.emit(
+                event_type,
+                source="local_agent",
+                severity=severity,
+                task_id=task_id,
+                agent_id=agent_id,
+                data=data,
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat()
 
     @staticmethod
     def _task_id(value: str) -> str:

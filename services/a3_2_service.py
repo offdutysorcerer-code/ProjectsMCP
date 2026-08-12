@@ -28,13 +28,15 @@ class A3_2Service:
         base_url: str = "http://127.0.0.1:5139",
         timeout_seconds: float = 120,
         artifacts_dir: Path | None = None,
+        telemetry: Any | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.artifacts_dir = artifacts_dir
+        self.telemetry = telemetry
         if self.artifacts_dir is not None:
             self.artifacts_dir.mkdir(parents=True, exist_ok=True)
-            self.agent_registry = A3_2AgentRegistry(self.artifacts_dir / "agents.json")
+            self.agent_registry = A3_2AgentRegistry(self.artifacts_dir / "agents.json", telemetry=telemetry)
         else:
             self.agent_registry = None
 
@@ -149,7 +151,13 @@ class A3_2Service:
         tabs = await self.list_tabs()
         if not any(str(tab.get("tabId")) == tab_id for tab in tabs):
             raise ValueError(f"A3_2 tab not found: {tab_id}")
-        return await registry.register_agent(name, role, tab_id, instructions)
+        agent = await registry.register_agent(name, role, tab_id, instructions)
+        self._emit(
+            "agent.online",
+            agent_id=name.strip().casefold(),
+            data={"name": agent.get("name"), "type": "chatgpt_agent", "backend": "a3_2", "tabId": tab_id},
+        )
+        return agent
 
     async def list_agents(self) -> dict[str, Any]:
         registry = self._require_agent_registry()
@@ -165,6 +173,11 @@ class A3_2Service:
     async def unregister_agent(self, name: str) -> dict[str, Any]:
         registry = self._require_agent_registry()
         agent = await registry.unregister_agent(name)
+        self._emit(
+            "agent.offline",
+            agent_id=name.strip().casefold(),
+            data={"name": agent.get("name"), "type": "chatgpt_agent", "backend": "a3_2"},
+        )
         return {"ok": True, "agent": agent}
 
     async def initialize_agent(
@@ -264,7 +277,7 @@ class A3_2Service:
         acceptance_criteria: list[str] | None = None,
     ) -> dict[str, Any]:
         registry = self._require_agent_registry()
-        return await registry.assign_task(
+        task = await registry.assign_task(
             name,
             task_id,
             objective,
@@ -274,6 +287,20 @@ class A3_2Service:
             write_scopes,
             acceptance_criteria,
         )
+        agent_id = name.strip().casefold()
+        self._emit(
+            "task.assigned",
+            task_id=task_id,
+            agent_id=agent_id,
+            data={**task, "assignedTo": agent_id, "backend": "a3_2"},
+        )
+        self._emit(
+            "dispatch.accepted",
+            task_id=task_id,
+            agent_id=agent_id,
+            data={"dispatchId": f"dispatch-{task_id}", "fromAgentId": "mcp-client", "toAgentId": agent_id, "backend": "a3_2"},
+        )
+        return task
 
     async def complete_agent_task(
         self,
@@ -282,7 +309,19 @@ class A3_2Service:
         status: str = "completed",
     ) -> dict[str, Any]:
         registry = self._require_agent_registry()
-        return await registry.complete_task(name, task_id, status)
+        task = await registry.complete_task(name, task_id, status)
+        event_type = {
+            "completed": "task.completed",
+            "cancelled": "task.cancelled",
+            "blocked": "task.blocked",
+        }.get(status.strip().casefold(), "task.completed")
+        self._emit(
+            event_type,
+            task_id=task_id,
+            agent_id=name.strip().casefold(),
+            data={**task, "backend": "a3_2"},
+        )
+        return task
 
     async def list_agent_tasks(self, status: str = "") -> dict[str, Any]:
         registry = self._require_agent_registry()
@@ -297,6 +336,14 @@ class A3_2Service:
     ) -> dict[str, Any]:
         registry = self._require_agent_registry()
         claims = await registry.claim_paths(name, paths, task_id)
+        for claim in claims:
+            claim_id = self._claim_id(name, str(claim.get("taskId") or task_id or ""), str(claim.get("path") or ""))
+            self._emit(
+                "resource.claimed",
+                task_id=str(claim.get("taskId") or task_id or "") or None,
+                agent_id=name.strip().casefold(),
+                data={"claimId": claim_id, "resourceType": "path", "resource": claim.get("path"), "mode": "exclusive", **claim},
+            )
         return {"count": len(claims), "claims": claims}
 
     async def release_agent_paths(
@@ -306,12 +353,53 @@ class A3_2Service:
     ) -> dict[str, Any]:
         registry = self._require_agent_registry()
         claims = await registry.release_paths(name, paths)
+        for claim in claims:
+            self._emit(
+                "resource.released",
+                task_id=str(claim.get("taskId") or "") or None,
+                agent_id=name.strip().casefold(),
+                data={
+                    "claimId": self._claim_id(name, str(claim.get("taskId") or ""), str(claim.get("path") or "")),
+                    "resourceType": "path",
+                    "resource": claim.get("path"),
+                    "mode": "exclusive",
+                    **claim,
+                },
+            )
         return {"count": len(claims), "claims": claims}
 
     async def list_agent_path_claims(self) -> dict[str, Any]:
         registry = self._require_agent_registry()
         claims = await registry.list_claims()
         return {"count": len(claims), "claims": claims}
+
+    def _emit(
+        self,
+        event_type: str,
+        *,
+        severity: str = "info",
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        if self.telemetry is None:
+            return
+        try:
+            self.telemetry.emit(
+                event_type,
+                source="a3_2",
+                severity=severity,
+                task_id=task_id,
+                agent_id=agent_id,
+                data=data,
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _claim_id(name: str, task_id: str, path: str) -> str:
+        normalized = path.strip().replace("\\", "/").casefold()
+        return f"a3_2:{name.strip().casefold()}:{task_id.strip()}:{normalized}"
 
     def _require_agent_registry(self) -> A3_2AgentRegistry:
         if self.agent_registry is None:

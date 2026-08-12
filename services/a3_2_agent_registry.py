@@ -10,8 +10,9 @@ from typing import Any
 class A3_2AgentRegistry:
     """Persistent local mapping, task state, path claims, and dispatch state for logical A3_2 agents."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, telemetry: Any | None = None) -> None:
         self.path = path
+        self.telemetry = telemetry
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
 

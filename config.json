@@ -14,7 +14,8 @@
       "attachment",
       "line_a23",
       "a3_2",
-      "local_agent"
+      "local_agent",
+      "runtime_telemetry"
     ]
   },
   "settings": {

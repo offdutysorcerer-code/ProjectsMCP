@@ -421,3 +421,20 @@ Long-running A28 / LM Studio coding tasks can be dispatched without holding an M
 - `local_agent_run_task(...)` remains for compatibility, but its blocking worker execution is offloaded with `asyncio.to_thread` so it no longer blocks the FastMCP event loop.
 
 `local_agent_max_concurrent_jobs` controls the local dispatcher worker pool size (default: 4). Each running job starts its own A28 worker process through `ProcessService`, so multiple local Agent jobs can progress concurrently. The command plugin likewise offloads blocking command execution from the FastMCP event loop.
+
+
+## A0 Runtime Telemetry / Control Center foundation
+
+A0 now normalizes orchestration activity into a shared runtime telemetry stream. The first schema covers tasks, agents/workers, MCP tool executions, resource claims, waits, dispatches, and an append-only event envelope.
+
+Runtime files are stored under `artifacts/runtime/` and remain outside Git:
+
+- `events/YYYY-MM-DD.jsonl` — one normalized event per line.
+- `state.json` — the latest derived state for Control Center consumption.
+
+The `runtime_telemetry` plugin exposes:
+
+- `runtime_snapshot()` — current summary plus agents, tasks, tool executions, claims, waits, dispatches, and recent events.
+- `runtime_recent_events(limit=100)` — recent normalized events.
+
+Current producers include MCP tool audit events (`tool.started/completed/failed/cancelled`), Local Agent queue/dispatch/execution lifecycle events, and A3_2 agent/task/path-claim events. The schema is intentionally backend-neutral so A28 LM Studio workers, A3_2 ChatGPT agents, and future workers can appear in one Control Center.

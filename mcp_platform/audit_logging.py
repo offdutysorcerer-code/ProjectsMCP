@@ -113,7 +113,7 @@ def _result_summary(result: Any) -> Any:
     return _sanitize(result)
 
 
-def install_tool_audit(mcp: Any) -> None:
+def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
     """Wrap FastMCP's tool decorator so every registered tool is audit logged."""
     original_tool = mcp.tool
 
@@ -129,6 +129,14 @@ def install_tool_audit(mcp: Any) -> None:
                     request_id = uuid.uuid4().hex[:12]
                     started = time.perf_counter()
                     params = _summarize_call(func, args, kwargs)
+                    if telemetry is not None:
+                        telemetry.emit(
+                            "tool.started",
+                            source="mcp",
+                            task_id=str(kwargs.get("task_id") or "") or None,
+                            request_id=request_id,
+                            data={"tool": tool_name, "parameters": params},
+                        )
                     logger.info(
                         "TOOL_START request_id=%s tool=%s params=%s",
                         request_id,
@@ -139,6 +147,14 @@ def install_tool_audit(mcp: Any) -> None:
                         result = await func(*args, **kwargs)
                     except asyncio.CancelledError:
                         elapsed_ms = int((time.perf_counter() - started) * 1000)
+                        if telemetry is not None:
+                            telemetry.emit(
+                                "tool.cancelled",
+                                source="mcp",
+                                task_id=str(kwargs.get("task_id") or "") or None,
+                                request_id=request_id,
+                                data={"tool": tool_name, "durationMs": elapsed_ms},
+                            )
                         logger.warning(
                             "TOOL_CANCEL request_id=%s tool=%s duration_ms=%s",
                             request_id,
@@ -146,8 +162,17 @@ def install_tool_audit(mcp: Any) -> None:
                             elapsed_ms,
                         )
                         raise
-                    except Exception:
+                    except Exception as exc:
                         elapsed_ms = int((time.perf_counter() - started) * 1000)
+                        if telemetry is not None:
+                            telemetry.emit(
+                                "tool.failed",
+                                source="mcp",
+                                severity="error",
+                                task_id=str(kwargs.get("task_id") or "") or None,
+                                request_id=request_id,
+                                data={"tool": tool_name, "durationMs": elapsed_ms, "error": f"{type(exc).__name__}: {exc}"},
+                            )
                         logger.exception(
                             "TOOL_ERROR request_id=%s tool=%s duration_ms=%s",
                             request_id,
@@ -156,6 +181,14 @@ def install_tool_audit(mcp: Any) -> None:
                         )
                         raise
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
+                    if telemetry is not None:
+                        telemetry.emit(
+                            "tool.completed",
+                            source="mcp",
+                            task_id=str(kwargs.get("task_id") or "") or None,
+                            request_id=request_id,
+                            data={"tool": tool_name, "durationMs": elapsed_ms, "resultSummary": _result_summary(result)},
+                        )
                     logger.info(
                         "TOOL_END request_id=%s tool=%s duration_ms=%s result=%s",
                         request_id,
@@ -172,6 +205,14 @@ def install_tool_audit(mcp: Any) -> None:
                 request_id = uuid.uuid4().hex[:12]
                 started = time.perf_counter()
                 params = _summarize_call(func, args, kwargs)
+                if telemetry is not None:
+                    telemetry.emit(
+                        "tool.started",
+                        source="mcp",
+                        task_id=str(kwargs.get("task_id") or "") or None,
+                        request_id=request_id,
+                        data={"tool": tool_name, "parameters": params},
+                    )
                 logger.info(
                     "TOOL_START request_id=%s tool=%s params=%s",
                     request_id,
@@ -180,8 +221,17 @@ def install_tool_audit(mcp: Any) -> None:
                 )
                 try:
                     result = func(*args, **kwargs)
-                except Exception:
+                except Exception as exc:
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
+                    if telemetry is not None:
+                        telemetry.emit(
+                            "tool.failed",
+                            source="mcp",
+                            severity="error",
+                            task_id=str(kwargs.get("task_id") or "") or None,
+                            request_id=request_id,
+                            data={"tool": tool_name, "durationMs": elapsed_ms, "error": f"{type(exc).__name__}: {exc}"},
+                        )
                     logger.exception(
                         "TOOL_ERROR request_id=%s tool=%s duration_ms=%s",
                         request_id,
@@ -190,6 +240,14 @@ def install_tool_audit(mcp: Any) -> None:
                     )
                     raise
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
+                if telemetry is not None:
+                    telemetry.emit(
+                        "tool.completed",
+                        source="mcp",
+                        task_id=str(kwargs.get("task_id") or "") or None,
+                        request_id=request_id,
+                        data={"tool": tool_name, "durationMs": elapsed_ms, "resultSummary": _result_summary(result)},
+                    )
                 logger.info(
                     "TOOL_END request_id=%s tool=%s duration_ms=%s result=%s",
                     request_id,

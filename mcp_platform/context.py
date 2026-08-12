@@ -11,6 +11,7 @@ from services.git_service import GitService
 from services.line_a23_service import LineA23Service
 from services.local_agent_service import LocalAgentService
 from services.process_service import ProcessService
+from services.runtime_telemetry_service import RuntimeTelemetryService
 
 
 @dataclass(frozen=True)
@@ -26,3 +27,4 @@ class PlatformContext:
     line_a23_service: LineA23Service
     local_agent_service: LocalAgentService
     process_service: ProcessService
+    runtime_telemetry_service: RuntimeTelemetryService

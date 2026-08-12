@@ -17,13 +17,15 @@ from services.git_service import GitService
 from services.line_a23_service import LineA23Service
 from services.local_agent_service import LocalAgentService
 from services.process_service import ProcessService
+from services.runtime_telemetry_service import RuntimeTelemetryService
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "config.json"
 ARTIFACTS_DIR = APP_DIR / "artifacts"
 
 mcp = FastMCP("ProjectsMCP Platform")
-install_tool_audit(mcp)
+runtime_telemetry_service = RuntimeTelemetryService(ARTIFACTS_DIR / "runtime")
+install_tool_audit(mcp, runtime_telemetry_service)
 config_service = ConfigService(CONFIG_PATH)
 file_service = FileService(config_service)
 browser_service = BrowserService(ARTIFACTS_DIR / "browser")
@@ -33,6 +35,7 @@ a3_2_service = A3_2Service(
     base_url=str(settings.get("a3_2_endpoint", "http://127.0.0.1:5139")),
     timeout_seconds=float(settings.get("a3_2_timeout_seconds", 120)),
     artifacts_dir=ARTIFACTS_DIR / "a3_2",
+    telemetry=runtime_telemetry_service,
 )
 line_a23_service = LineA23Service(
     endpoint=str(settings.get("line_a23_endpoint", "http://127.0.0.1:3000/mcp")),
@@ -54,6 +57,7 @@ local_agent_service = LocalAgentService(
     worker_dir=Path(str(settings.get("local_agent_worker_dir", r"D:\AIProjects\A28-Agent2AgentWithLMStudio"))),
     timeout_seconds=int(settings.get("local_agent_timeout_seconds", 180)),
     max_concurrent_jobs=int(settings.get("local_agent_max_concurrent_jobs", 4)),
+    telemetry=runtime_telemetry_service,
 )
 context = PlatformContext(
     a3_2_service=a3_2_service,
@@ -65,6 +69,7 @@ context = PlatformContext(
     line_a23_service=line_a23_service,
     local_agent_service=local_agent_service,
     process_service=process_service,
+    runtime_telemetry_service=runtime_telemetry_service,
 )
 registry = PluginRegistry(context)
 registry.load_enabled_plugins(config_service.get_enabled_plugins())
