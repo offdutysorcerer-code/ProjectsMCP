@@ -32,6 +32,39 @@ class ProcessService:
                 continue
         return data.decode("utf-8", errors="replace")
 
+    @staticmethod
+    def _normalized_environment(env: Mapping[str, str] | None = None) -> dict[str, str] | None:
+        if os.name != "nt":
+            return dict(env) if env is not None else None
+
+        normalized = dict(os.environ if env is None else env)
+        system_root = normalized.get("SystemRoot") or normalized.get("WINDIR") or r"C:\Windows"
+        user_profile = normalized.get("USERPROFILE") or str(Path.home())
+        temp_candidate = (normalized.get("TEMP") or "").strip().strip('"')
+        temp_dir = temp_candidate if temp_candidate and Path(temp_candidate).is_dir() else str(Path(user_profile) / "AppData" / "Local" / "Temp")
+        user_path = Path(user_profile)
+        user_drive = user_path.drive or "C:"
+
+        defaults = {
+            "SystemRoot": system_root,
+            "WINDIR": system_root,
+            "ComSpec": str(Path(system_root) / "System32" / "cmd.exe"),
+            "ProgramFiles": r"C:\Program Files",
+            "ProgramFiles(x86)": r"C:\Program Files (x86)",
+            "ProgramW6432": r"C:\Program Files",
+            "USERPROFILE": user_profile,
+            "HOME": user_profile,
+            "HOMEDRIVE": user_drive,
+            "HOMEPATH": str(user_path).replace(user_drive, "", 1),
+            "TEMP": temp_dir,
+            "TMP": temp_dir,
+        }
+        for key, value in defaults.items():
+            current = (normalized.get(key) or "").strip().strip('"')
+            if not current or (key in {"TEMP", "TMP"} and not Path(current).is_dir()):
+                normalized[key] = value
+        return normalized
+
     def _read_output(self, stream: Any) -> tuple[str, bool]:
         stream.seek(0, os.SEEK_END)
         size = stream.tell()
@@ -102,7 +135,7 @@ class ProcessService:
                     stdin=subprocess.DEVNULL,
                     stdout=stdout_file,
                     stderr=stderr_file,
-                    env=dict(env) if env is not None else None,
+                    env=self._normalized_environment(env),
                     shell=False,
                     creationflags=creationflags,
                     **popen_kwargs,
