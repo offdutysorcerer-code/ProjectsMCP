@@ -143,6 +143,9 @@ class A3_2AgentRegistry:
                 "writeScopes": self._clean_strings(write_scopes),
                 "acceptanceCriteria": self._clean_strings(acceptance_criteria),
                 "status": "assigned",
+                "dispatchState": "pending",
+                "dispatchError": None,
+                "dispatchedAt": None,
                 "createdAt": existing.get("createdAt") if existing else now,
                 "updatedAt": now,
             }
@@ -188,6 +191,30 @@ class A3_2AgentRegistry:
             if wanted:
                 tasks = [task for task in tasks if str(task.get("status", "")).casefold() == wanted]
             return [self._public_task(task) for task in tasks]
+
+    async def update_task_dispatch_state(
+        self,
+        task_id: str,
+        dispatch_state: str,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        task_id = task_id.strip()
+        state = dispatch_state.strip().casefold()
+        allowed = {"pending", "initializing", "dispatching", "dispatched", "dispatch_failed"}
+        if state not in allowed:
+            raise ValueError(f"Invalid dispatch state: {dispatch_state}")
+        async with self._lock:
+            data = await self._load()
+            task = data["tasks"].get(task_id)
+            if task is None:
+                raise KeyError(f"Task not found: {task_id}")
+            task["dispatchState"] = state
+            task["dispatchError"] = error
+            if state == "dispatched":
+                task["dispatchedAt"] = self._now()
+            task["updatedAt"] = self._now()
+            await self._save(data)
+            return self._public_task(task)
 
     async def claim_paths(self, name: str, paths: list[str], task_id: str = "") -> list[dict[str, Any]]:
         key = self._normalize_name(name)
@@ -379,6 +406,10 @@ class A3_2AgentRegistry:
             agent.setdefault("cooldownUntil", None)
             agent.setdefault("rateLimitCount", 0)
             agent.setdefault("currentTaskId", None)
+        for task in data["tasks"].values():
+            task.setdefault("dispatchState", "pending" if task.get("status") == "assigned" else "dispatched")
+            task.setdefault("dispatchError", None)
+            task.setdefault("dispatchedAt", None)
         return data
 
     async def _save(self, data: dict[str, Any]) -> None:

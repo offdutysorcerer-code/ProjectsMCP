@@ -132,6 +132,9 @@ class AgentTaskOutput(BaseModel):
     writeScopes: list[str] = Field(default_factory=list)
     acceptanceCriteria: list[str] = Field(default_factory=list)
     status: Literal["assigned", "completed", "cancelled", "blocked", "orphaned"]
+    dispatchState: Literal["pending", "initializing", "dispatching", "dispatched", "dispatch_failed"] = "pending"
+    dispatchError: str | None = None
+    dispatchedAt: str | None = None
     createdAt: str
     updatedAt: str
 

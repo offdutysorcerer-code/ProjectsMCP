@@ -300,7 +300,58 @@ class A3_2Service:
             agent_id=agent_id,
             data={"dispatchId": f"dispatch-{task_id}", "fromAgentId": "mcp-client", "toAgentId": agent_id, "backend": "a3_2"},
         )
+        job = asyncio.create_task(self._auto_dispatch_assigned_task(task))
+        job.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
         return task
+
+    async def _auto_dispatch_assigned_task(self, task: dict[str, Any]) -> None:
+        registry = self._require_agent_registry()
+        task_id = str(task["taskId"])
+        name = str(task["agent"])
+        try:
+            agent = await registry.get_agent(name)
+            if not agent.get("initialized"):
+                await registry.update_task_dispatch_state(task_id, "initializing")
+                initialized = await self.initialize_agent(name, 120)
+                if not initialized.get("ok"):
+                    await registry.update_task_dispatch_state(
+                        task_id, "dispatch_failed", str(initialized.get("error") or initialized.get("status"))
+                    )
+                    return
+
+            await registry.update_task_dispatch_state(task_id, "dispatching")
+            prompt = self._build_task_dispatch_prompt(task)
+            for attempt in range(2):
+                dispatched = await self.send_to_agent(name, prompt, 600)
+                if dispatched.get("status") != "cooldown":
+                    break
+                await asyncio.sleep(max(1, int(dispatched.get("retryAfterSeconds", 1))))
+            if dispatched.get("ok"):
+                await registry.update_task_dispatch_state(task_id, "dispatched")
+            else:
+                await registry.update_task_dispatch_state(
+                    task_id, "dispatch_failed", str(dispatched.get("error") or dispatched.get("status"))
+                )
+        except Exception as exc:
+            await registry.update_task_dispatch_state(task_id, "dispatch_failed", str(exc))
+
+    @staticmethod
+    def _build_task_dispatch_prompt(task: dict[str, Any]) -> str:
+        def lines(label: str, values: list[str]) -> str:
+            if not values:
+                return f"{label}: (none)"
+            return label + ":\n" + "\n".join(f"- {value}" for value in values)
+
+        return "\n".join([
+            f"TASK_ID: {task['taskId']}",
+            f"Objective: {task['objective']}",
+            f"Project: {task['project']}",
+            f"Working path: {task.get('workingPath') or '(project root)'}",
+            lines("Read scopes", list(task.get("readScopes") or [])),
+            lines("Write scopes", list(task.get("writeScopes") or [])),
+            lines("Acceptance criteria", list(task.get("acceptanceCriteria") or [])),
+            "Execute the task now. Stay strictly within scope. Use the available ProjectMCP tools for actual file/data work when needed. Do not recursively delegate. At the end, report what you changed or found, validation performed, and any blocker.",
+        ])
 
     async def complete_agent_task(
         self,

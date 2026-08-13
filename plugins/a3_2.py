@@ -141,7 +141,7 @@ class A3_2Plugin:
             write_scopes: list[str] | None = None,
             acceptance_criteria: list[str] | None = None,
         ) -> AgentTaskOutput:
-            """Assign one scoped task to an agent without baking task-specific rules into base instructions."""
+            """Assign one scoped task and asynchronously dispatch it to the agent conversation."""
             return AgentTaskOutput.model_validate(
                 await service.assign_agent_task(
                     name,
