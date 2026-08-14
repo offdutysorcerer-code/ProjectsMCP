@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
@@ -83,6 +86,7 @@ public partial class MainWindow : Window
             var eventsPath = Path.Combine(runtimeRoot, "events");
             var state = await ReadJsonObjectAsync(statePath) ?? EmptyState();
             var events = await ReadRecentEventsAsync(eventsPath, 160);
+            var infrastructure = await BuildInfrastructureSnapshotAsync();
             await SendAsync(new
             {
                 type = "snapshot",
@@ -91,6 +95,7 @@ public partial class MainWindow : Window
                 runtimeRoot,
                 stateExists = File.Exists(statePath),
                 autoRefresh = _timer.IsEnabled,
+                infrastructure,
                 state,
                 events
             });
@@ -144,6 +149,119 @@ public partial class MainWindow : Window
         }
         result.Reverse();
         return result;
+    }
+
+    private async Task<object> BuildInfrastructureSnapshotAsync()
+    {
+        const int port = 8090;
+        var listenerPid = FindListeningPid(port);
+        var mcpReady = await ProbeMcpAsync(port);
+
+        var configPath = Path.Combine(_projectRoot, "config.json");
+        var config = await ReadJsonObjectAsync(configPath);
+        var endpoint = config?["settings"]?["endpoint"] as JsonObject;
+        var publicSseUrl = endpoint?["public_sse_url"]?.GetValue<string>() ?? string.Empty;
+        var connectorEndpoint = endpoint?["active_connector_endpoint"]?.GetValue<string>() ?? string.Empty;
+        var localSseUrl = endpoint?["local_sse_url"]?.GetValue<string>() ?? $"http://127.0.0.1:{port}/sse";
+
+        var tunnelRoot = Path.Combine(Directory.GetParent(_projectRoot)!.FullName, "A0_1-ProjectsMCP_CloudFlareTunnel");
+        var runtimeDir = Path.Combine(tunnelRoot, "runtime");
+        var runningTunnels = new List<object>();
+        if (Directory.Exists(runtimeDir))
+        {
+            foreach (var pidFile in Directory.GetFiles(runtimeDir, "*.pid").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var profile = Path.GetFileNameWithoutExtension(pidFile);
+                if (!int.TryParse((await File.ReadAllTextAsync(pidFile)).Trim(), out var pid) || !IsProcessAlive(pid, "cloudflared"))
+                    continue;
+
+                var runtimeConfig = Path.Combine(runtimeDir, profile + ".config.yml");
+                var hostConfig = Path.Combine(tunnelRoot, "hosts", profile, "config.yml");
+                var tunnelConfig = File.Exists(runtimeConfig) ? runtimeConfig : hostConfig;
+                var tunnelId = string.Empty;
+                var hostname = string.Empty;
+                if (File.Exists(tunnelConfig))
+                {
+                    var text = await File.ReadAllTextAsync(tunnelConfig);
+                    tunnelId = Regex.Match(text, @"(?m)^\s*tunnel:\s*([^\s#]+)").Groups[1].Value.Trim();
+                    hostname = Regex.Match(text, @"(?m)^\s*-\s*hostname:\s*([^\s#]+)").Groups[1].Value.Trim();
+                }
+
+                runningTunnels.Add(new { profile, pid, tunnelId, hostname, config = tunnelConfig });
+            }
+        }
+
+        var activeTunnel = runningTunnels.FirstOrDefault();
+        return new
+        {
+            mcp = new
+            {
+                running = listenerPid.HasValue && mcpReady,
+                listenerPid,
+                port,
+                ready = mcpReady,
+                localSseUrl
+            },
+            cloudflare = new
+            {
+                running = runningTunnels.Count > 0,
+                tunnels = runningTunnels,
+                active = activeTunnel
+            },
+            connector = new
+            {
+                publicSseUrl,
+                connectorEndpoint,
+                matchesPublic = !string.IsNullOrWhiteSpace(publicSseUrl) && string.Equals(publicSseUrl, connectorEndpoint, StringComparison.OrdinalIgnoreCase)
+            }
+        };
+    }
+
+    private static int? FindListeningPid(int port)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("netstat.exe", "-ano -p tcp")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(psi);
+            if (process is null) return null;
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(1500);
+            foreach (var line in output.Split('\n'))
+            {
+                var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 5 || !string.Equals(parts[3], "LISTENING", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!parts[1].EndsWith(":" + port, StringComparison.OrdinalIgnoreCase)) continue;
+                if (int.TryParse(parts[^1], out var pid)) return pid;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static bool IsProcessAlive(int pid, string expectedName)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited && process.ProcessName.Contains(expectedName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    private static async Task<bool> ProbeMcpAsync(int port)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+            using var response = await client.GetAsync($"http://127.0.0.1:{port}/mcp", HttpCompletionOption.ResponseHeadersRead);
+            return (int)response.StatusCode < 500;
+        }
+        catch { return false; }
     }
 
     private static JsonObject EmptyState() => new()

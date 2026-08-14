@@ -148,29 +148,23 @@ class CommandPlugin:
             def ps_quote(value: str) -> str:
                 return "'" + value.replace("'", "''") + "'"
 
-            watchdog_args = [
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(script),
-                "-Port",
-                "8090",
-                "-DelaySeconds",
-                str(max(1, int(delay_seconds))),
-                "-StartupTimeoutSeconds",
-                str(max(5, int(startup_timeout_seconds))),
-                "-ResultPath",
-                str(result_path),
-            ]
-            args_literal = ",".join(ps_quote(arg) for arg in watchdog_args)
+            watchdog_script = (
+                f"& {ps_quote(str(script))} "
+                f"-Port 8090 "
+                f"-DelaySeconds {max(1, int(delay_seconds))} "
+                f"-StartupTimeoutSeconds {max(5, int(startup_timeout_seconds))} "
+                f"-ResultPath {ps_quote(str(result_path))}"
+            )
+            watchdog_encoded = base64.b64encode(watchdog_script.encode("utf-16-le")).decode("ascii")
+            watchdog_command = (
+                f'"{powershell}" -NoLogo -NoProfile -NonInteractive '
+                f'-ExecutionPolicy Bypass -EncodedCommand {watchdog_encoded}'
+            )
             launcher_script = (
-                f"$a=@({args_literal}); "
-                f"$p=Start-Process -FilePath {ps_quote(powershell)} -ArgumentList $a "
-                f"-WorkingDirectory {ps_quote(str(project_root))} -WindowStyle Hidden -PassThru; "
-                "$p.Id"
+                f"$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+                f"-Arguments @{{CommandLine={ps_quote(watchdog_command)}}}; "
+                "if([int]$r.ReturnValue -ne 0){ throw ('Win32_Process.Create failed: ' + $r.ReturnValue) }; "
+                "$r.ProcessId"
             )
             encoded = base64.b64encode(launcher_script.encode("utf-16-le")).decode("ascii")
             launch = process_service.run(

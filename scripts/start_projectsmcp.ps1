@@ -57,6 +57,25 @@ function Write-LoggedLine {
     Append-LogSafe $line
 }
 
+function Test-IntentionalRestart {
+    $resultPath = Join-Path $projectRoot 'artifacts\restart\latest.json'
+    if (!(Test-Path $resultPath)) { return $false }
+    try {
+        $state = Get-Content -Raw -Encoding UTF8 $resultPath | ConvertFrom-Json
+        if ([string]$state.status -notin @('queued','scheduled','starting')) { return $false }
+        $stamp = $null
+        foreach ($name in @('updated_at','requested_at','timestamp')) {
+            if ($state.PSObject.Properties.Name -contains $name -and $state.$name) {
+                $stamp = [DateTimeOffset]::Parse([string]$state.$name)
+                break
+            }
+        }
+        if ($null -eq $stamp) { return $false }
+        return (([DateTimeOffset]::Now - $stamp).TotalMinutes -le 2)
+    }
+    catch { return $false }
+}
+
 function Find-UvCommand {
     $uv = Get-Command uv -ErrorAction SilentlyContinue
     if ($null -ne $uv) {
@@ -114,13 +133,13 @@ try {
         $commandLine = $existingListener.CommandLine
         $isProjectsMcp =
             $commandLine -match '(?i)mcp-proxy(?:\.exe)?' -and
-            $commandLine -match ('(?i)(?:--port\s+|--port=)' + [regex]::Escape([string]$Port)) -and
+            $commandLine -match ('(?i)--port(?:\s+|=)' + [regex]::Escape([string]$Port)) -and
             $commandLine -match '(?i)server\.py'
 
         if ($isProjectsMcp) {
             Write-LoggedLine "INFO" "ProjectsMCP is already running on ${HostAddress}:$Port (PID $($existingListener.Pid))."
-            Write-LoggedLine "INFO" "No second instance will be started."
-            exit 0
+            Write-LoggedLine "INFO" "No second instance will be started; launcher will switch to status monitor mode."
+            exit 76
         }
 
         Write-LoggedLine "ERROR" "Port $Port is already in use by another process."
@@ -171,11 +190,15 @@ try {
 
     if ($exitCode -eq 0) {
         Write-LoggedLine "INFO" "ProjectsMCP stopped normally."
-    }
-    else {
-        Write-LoggedLine "ERROR" "ProjectsMCP stopped with exit code $exitCode."
+        exit 0
     }
 
+    if (Test-IntentionalRestart) {
+        Write-LoggedLine "INFO" "ProjectsMCP stopped because an intentional restart is in progress."
+        exit 75
+    }
+
+    Write-LoggedLine "ERROR" "ProjectsMCP stopped with exit code $exitCode."
     exit $exitCode
 }
 catch {

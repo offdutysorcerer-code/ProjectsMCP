@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,8 @@ from services.process_service import ProcessService
 from services.runtime_telemetry_service import RuntimeTelemetryService
 
 APP_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = APP_DIR / "config.json"
-ARTIFACTS_DIR = APP_DIR / "artifacts"
+CONFIG_PATH = Path(os.environ.get("PROJECTSMCP_CONFIG_PATH", str(APP_DIR / "config.json"))).resolve()
+ARTIFACTS_DIR = Path(os.environ.get("PROJECTSMCP_ARTIFACTS_DIR", str(APP_DIR / "artifacts"))).resolve()
 
 mcp = FastMCP("ProjectsMCP Platform")
 runtime_telemetry_service = RuntimeTelemetryService(ARTIFACTS_DIR / "runtime")

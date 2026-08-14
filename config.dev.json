@@ -1,0 +1,79 @@
+{
+  "projects": {
+    "market": "D:\\MarketResearch",
+    "ai": "D:\\AIProjects"
+  },
+  "plugins": {
+    "enabled": [
+      "project",
+      "browser",
+      "git",
+      "command",
+      "mail_reader",
+      "desktop",
+      "attachment",
+      "line_a23",
+      "a3_2",
+      "local_agent",
+      "runtime_telemetry"
+    ]
+  },
+  "settings": {
+    "endpoint": {
+      "local_sse_url": "http://127.0.0.1:8091/sse",
+      "public_sse_url": "https://mcp-dev.offdutylab.xyz/sse",
+      "active_tunnel_provider": "cloudflare",
+      "active_connector_endpoint": "https://mcp-dev.offdutylab.xyz/sse",
+      "generation_source": "config.dev.json:settings.endpoint"
+    },
+    "a3_2_endpoint": "http://127.0.0.1:5139",
+    "a3_2_timeout_seconds": 120,
+    "local_agent_worker_dir": "D:\\AIProjects\\A28-Agent2AgentWithLMStudio",
+    "local_agent_timeout_seconds": 180,
+    "local_agent_max_concurrent_jobs": 4,
+    "line_a23_endpoint": "http://127.0.0.1:3000/mcp",
+    "line_a23_timeout_seconds": 120,
+    "attachment_save_directory": "D:\\07庫電腦D槽-214585\\214585\\C342\\History",
+    "attachment_source_directory": "D:\\AIProjects\\A16-mcp-relay\\company-agent\\attachments",
+    "max_attachment_bytes": 1073741824,
+    "max_read_bytes": 1048576,
+    "command_timeout_seconds": 60,
+    "git_timeout_seconds": 60,
+    "process_kill_grace_seconds": 3,
+    "max_command_output_bytes": 2097152,
+    "allowed_write_extensions": [
+      ".txt",
+      ".md",
+      ".json",
+      ".csv",
+      ".py",
+      ".cs",
+      ".xaml",
+      ".csproj",
+      ".js",
+      ".ts",
+      ".html",
+      ".css",
+      ".bat",
+      ".ps1",
+      ".yml",
+      ".yaml"
+    ],
+    "default_exclude_patterns": [
+      ".git",
+      ".svn",
+      ".hg",
+      "node_modules",
+      "bin",
+      "obj",
+      ".venv",
+      "venv",
+      "__pycache__",
+      ".pytest_cache",
+      ".mypy_cache",
+      "dist",
+      "build",
+      "artifacts"
+    ]
+  }
+}
