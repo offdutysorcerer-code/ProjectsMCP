@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from pypdf import PdfReader
+
 from services.config_service import ConfigService
 
 
@@ -78,11 +80,91 @@ class FileService:
             raise FileNotFoundError(f"File not found: {path}")
         if not target.is_file():
             raise IsADirectoryError(f"Not a file: {path}")
+        if target.suffix.lower() == ".pdf":
+            return self.read_pdf_text(project, path)
         size = target.stat().st_size
         max_read_bytes = self.config_service.get_max_read_bytes()
         if size > max_read_bytes:
             raise ValueError(f"File is too large to read safely: {size} bytes. Limit: {max_read_bytes} bytes")
         return {"project": project, "path": path, "absolute_path": str(target), "size": size, "content": target.read_text(encoding="utf-8")}
+
+    def read_pdf_text(
+        self,
+        project: str,
+        path: str,
+        start_page: int = 1,
+        end_page: int | None = None,
+        max_chars: int = 200000,
+    ) -> dict[str, Any]:
+        target = self.resolve_project_path(project, path)
+        if not target.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+        if not target.is_file():
+            raise IsADirectoryError(f"Not a file: {path}")
+        if target.suffix.lower() != ".pdf":
+            raise ValueError("Only PDF files are supported by read_pdf_text")
+
+        size = target.stat().st_size
+        max_read_bytes = self.config_service.get_max_pdf_read_bytes()
+        if size > max_read_bytes:
+            raise ValueError(f"PDF is too large to read safely: {size} bytes. Limit: {max_read_bytes} bytes")
+        if start_page < 1:
+            raise ValueError("start_page must be >= 1")
+        if end_page is not None and end_page < start_page:
+            raise ValueError("end_page must be >= start_page")
+        if max_chars < 1:
+            raise ValueError("max_chars must be >= 1")
+
+        reader = PdfReader(str(target))
+        page_count = len(reader.pages)
+        if page_count == 0:
+            return {
+                "project": project,
+                "path": path,
+                "absolute_path": str(target),
+                "size": size,
+                "page_count": 0,
+                "pages_read": [],
+                "content": "",
+                "truncated": False,
+            }
+        if start_page > page_count:
+            raise ValueError(f"start_page {start_page} exceeds PDF page count {page_count}")
+
+        resolved_end = min(end_page or page_count, page_count)
+        chunks: list[str] = []
+        pages_read: list[int] = []
+        total_chars = 0
+        truncated = False
+
+        for page_number in range(start_page, resolved_end + 1):
+            text = reader.pages[page_number - 1].extract_text() or ""
+            separator = "\n\n" if chunks and text else ""
+            remaining = max_chars - total_chars
+            if remaining <= 0:
+                truncated = True
+                break
+            addition = f"{separator}{text}"
+            if len(addition) > remaining:
+                chunks.append(addition[:remaining])
+                pages_read.append(page_number)
+                total_chars += remaining
+                truncated = True
+                break
+            chunks.append(addition)
+            pages_read.append(page_number)
+            total_chars += len(addition)
+
+        return {
+            "project": project,
+            "path": path,
+            "absolute_path": str(target),
+            "size": size,
+            "page_count": page_count,
+            "pages_read": pages_read,
+            "content": "".join(chunks),
+            "truncated": truncated,
+        }
 
     def read_multiple_files(self, project: str, paths: list[str]) -> dict[str, Any]:
         results = []

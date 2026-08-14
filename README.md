@@ -31,7 +31,7 @@ The Project plugin keeps the original ProjectsMCP tool names:
 
 - `list_projects()`
 - `list_files(project, path="")`
-- `read_file(project, path)`
+- `read_file(project, path)` — reads UTF-8 text files and automatically extracts text from PDFs inside configured project roots.
 - `read_multiple_files(project, paths)`
 - `write_file(project, path, content)`
 - `append_file(project, path, content)`
@@ -450,3 +450,45 @@ StartA0ControlCenter.bat
 ```
 
 The first version shows work queue/tasks, agents/workers, active resource claims, MCP tool activity, dispatch records, and recent runtime events. It refreshes once per second by default and does not expose cancel/retry/release or other mutating operations.
+
+## Public endpoint and connector registration
+
+The single source of truth for the public ProjectsMCP SSE URL is
+`config.json` -> `settings.endpoint.public_sse_url`. The production endpoint is:
+
+```text
+https://mcp-main.offdutylab.xyz/sse
+```
+
+`網址.txt` is a legacy human-readable pointer only. No runtime code, setup script,
+plugin loader, or manifest generator reads it. Cloudflare host profiles define
+tunnel routing, but do not define the ChatGPT connector endpoint.
+
+The ChatGPT custom connector/plugin stores its endpoint when the connector is
+created or refreshed. A0 does not generate or update that remote registration.
+Restarting A0 terminates existing SSE sessions; the connector should reconnect to
+the same stable URL. If ChatGPT keeps an old session or an old ngrok install-time
+snapshot, refresh the connector. If refresh does not replace the endpoint, remove
+and reinstall the connector using the production URL above, then start a new chat.
+
+The `mcp_diagnostics()` tool reports the local and public SSE URLs, tunnel
+provider, expected active connector endpoint, server start time and PID, and the
+configuration source. Its tool name and response keys are intentionally stable
+across server restarts.
+
+
+## Codex Agent plugin
+
+The `codex_agent` plugin dispatches coding tasks directly to the official OpenAI Codex CLI. It does not use LM Studio or the A28 LocalDeveloper worker.
+
+Tools:
+
+- `codex_agent_status()`
+- `codex_agent_submit_task(project, working_path, objective, acceptance_criteria, constraints=None, task_id="", sandbox="workspace-write", model="", timeout_seconds=900)`
+- `codex_agent_task_status(task_id)`
+- `codex_agent_task_result(task_id)`
+- `codex_agent_run_task(...)`
+
+Default execution uses `codex exec --ephemeral --sandbox workspace-write <PROMPT>`. The adapter also accepts `read-only`; dangerous sandbox bypass modes are intentionally not exposed. The generated worker prompt forbids commit, push, reset, or Git history rewriting.
+
+Windows prerequisite: install the official Codex CLI, authenticate it with ChatGPT, and verify `codex --version` plus `codex login status` before starting ProjectsMCP.

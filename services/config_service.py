@@ -39,6 +39,9 @@ class ConfigService:
     def get_max_read_bytes(self) -> int:
         return int(self.get_settings().get("max_read_bytes", 1048576))
 
+    def get_max_pdf_read_bytes(self) -> int:
+        return int(self.get_settings().get("max_pdf_read_bytes", 26214400))
+
     def get_allowed_write_extensions(self) -> set[str]:
         values = self.get_settings().get("allowed_write_extensions", [])
         return {str(value).lower() for value in values}
