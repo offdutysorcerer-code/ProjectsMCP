@@ -151,6 +151,7 @@ class ProcessService:
                     "command": command_list,
                 }
 
+            pid = process.pid
             timed_out = False
             try:
                 returncode = process.wait(timeout=timeout)
@@ -162,12 +163,15 @@ class ProcessService:
             stdout, stdout_truncated = self._read_output(stdout_file)
             stderr, stderr_truncated = self._read_output(stderr_file)
 
+        process_tree_terminated = bool(timed_out)
         if timed_out:
             message = f"Command timed out after {timeout} seconds; process tree was terminated."
             stderr = f"{stderr}\n{message}".strip()
 
         return {
             "ok": returncode == 0 and not timed_out,
+            "pid": pid,
+            "process_tree_terminated": process_tree_terminated,
             "returncode": returncode,
             "stdout": stdout,
             "stderr": stderr,

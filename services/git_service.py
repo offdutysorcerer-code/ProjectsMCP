@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
+from services.executable_registry import ExecutableRegistry
 from services.file_service import FileService
 from services.process_service import ProcessService
 
@@ -20,10 +20,12 @@ class GitService:
         self,
         file_service: FileService,
         process_service: ProcessService,
+        executables: ExecutableRegistry,
         default_timeout_seconds: int = 60,
     ) -> None:
         self.file_service = file_service
         self.process_service = process_service
+        self.executables = executables
         self.default_timeout_seconds = max(1, int(default_timeout_seconds))
 
     def _resolve_workdir(self, project: str, path: str = "") -> Path:
@@ -95,11 +97,11 @@ class GitService:
             if detect_repo
             else requested_workdir
         )
-        git_path = shutil.which("git")
+        git_path = self.executables.get("git")
         if not git_path:
             raise RuntimeError(
-                "git executable was not found in PATH. Install Git for Windows "
-                "or add git.exe to PATH, then restart the MCP server."
+                "git executable was not found when A0 started. Install Git for Windows "
+                "or fix PATH, then restart the MCP server so the executable registry can refresh."
             )
 
         env = os.environ.copy()
@@ -137,17 +139,16 @@ class GitService:
 
     def version(self) -> dict[str, Any]:
         """Report whether Git is discoverable by the MCP server process."""
-        git_path = shutil.which("git")
+        git_path = self.executables.get("git")
         return {
-            "command": ["git", "--version"],
+            "command": [git_path or "git", "--version"],
             "git_path": git_path,
             "stdout": "",
-            "stderr": "" if git_path else "git executable was not found in PATH.",
+            "stderr": "" if git_path else "git executable was not found when A0 started.",
             "ok": git_path is not None,
-            "diagnostic_type": "path_lookup",
+            "diagnostic_type": "startup_registry",
             "note": (
-                "This checks executable discovery only. Run git_status to verify "
-                "that the MCP server can start Git."
+                "This reports the frozen startup executable registry. Restart A0 to refresh discovery."
             ),
         }
 

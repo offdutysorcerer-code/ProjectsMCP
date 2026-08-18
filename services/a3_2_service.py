@@ -226,6 +226,8 @@ class A3_2Service:
         name: str,
         message: str,
         timeout_seconds: int = 120,
+        *,
+        dispatch_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         registry = self._require_agent_registry()
         agent = await registry.get_agent(name)
@@ -240,6 +242,13 @@ class A3_2Service:
             return self._cooldown_result(dispatch, agent, "Agent dispatch is waiting for cooldown.")
 
         await registry.mark_send_started(name)
+        if dispatch_context is not None:
+            self._emit(
+                "dispatch.sending",
+                task_id=str(dispatch_context.get("taskId") or "") or None,
+                agent_id=name.strip().casefold(),
+                data={**dispatch_context, "dispatchPrompt": message},
+            )
         try:
             result = await self.chatgpt_send_message(
                 str(agent["tabId"]),
@@ -298,7 +307,7 @@ class A3_2Service:
             "dispatch.accepted",
             task_id=task_id,
             agent_id=agent_id,
-            data={"dispatchId": f"dispatch-{task_id}", "fromAgentId": "mcp-client", "toAgentId": agent_id, "backend": "a3_2"},
+            data=self._task_dispatch_telemetry(task),
         )
         job = asyncio.create_task(self._auto_dispatch_assigned_task(task))
         job.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
@@ -308,32 +317,91 @@ class A3_2Service:
         registry = self._require_agent_registry()
         task_id = str(task["taskId"])
         name = str(task["agent"])
+        dispatch_data = self._task_dispatch_telemetry(task)
         try:
             agent = await registry.get_agent(name)
             if not agent.get("initialized"):
                 await registry.update_task_dispatch_state(task_id, "initializing")
+                self._emit(
+                    "dispatch.initializing",
+                    task_id=task_id,
+                    agent_id=name.strip().casefold(),
+                    data=dispatch_data,
+                )
                 initialized = await self.initialize_agent(name, 120)
                 if not initialized.get("ok"):
+                    error = str(initialized.get("error") or initialized.get("status"))
                     await registry.update_task_dispatch_state(
-                        task_id, "dispatch_failed", str(initialized.get("error") or initialized.get("status"))
+                        task_id, "dispatch_failed", error
+                    )
+                    self._emit(
+                        "dispatch.failed",
+                        severity="error",
+                        task_id=task_id,
+                        agent_id=name.strip().casefold(),
+                        data={**dispatch_data, "error": error},
                     )
                     return
 
             await registry.update_task_dispatch_state(task_id, "dispatching")
             prompt = self._build_task_dispatch_prompt(task)
             for attempt in range(2):
-                dispatched = await self.send_to_agent(name, prompt, 600)
+                dispatched = await self.send_to_agent(
+                    name,
+                    prompt,
+                    600,
+                    dispatch_context={**dispatch_data, "attempt": attempt + 1},
+                )
                 if dispatched.get("status") != "cooldown":
                     break
                 await asyncio.sleep(max(1, int(dispatched.get("retryAfterSeconds", 1))))
             if dispatched.get("ok"):
                 await registry.update_task_dispatch_state(task_id, "dispatched")
+                self._emit(
+                    "dispatch.completed",
+                    task_id=task_id,
+                    agent_id=name.strip().casefold(),
+                    data={**dispatch_data, "dispatchPrompt": prompt},
+                )
             else:
+                error = str(dispatched.get("error") or dispatched.get("status"))
                 await registry.update_task_dispatch_state(
-                    task_id, "dispatch_failed", str(dispatched.get("error") or dispatched.get("status"))
+                    task_id, "dispatch_failed", error
+                )
+                self._emit(
+                    "dispatch.failed",
+                    severity="error",
+                    task_id=task_id,
+                    agent_id=name.strip().casefold(),
+                    data={**dispatch_data, "dispatchPrompt": prompt, "error": error},
                 )
         except Exception as exc:
             await registry.update_task_dispatch_state(task_id, "dispatch_failed", str(exc))
+            self._emit(
+                "dispatch.failed",
+                severity="error",
+                task_id=task_id,
+                agent_id=name.strip().casefold(),
+                data={**dispatch_data, "error": str(exc)},
+            )
+
+    @staticmethod
+    def _task_dispatch_telemetry(task: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(task["taskId"])
+        agent_id = str(task["agent"]).strip().casefold()
+        return {
+            "dispatchId": f"dispatch-{task_id}",
+            "fromAgentId": "mcp/a0",
+            "toAgentId": agent_id,
+            "backend": "a3_2",
+            "taskId": task_id,
+            "objective": task.get("objective"),
+            "project": task.get("project"),
+            "workingPath": task.get("workingPath") or "",
+            "readScopes": list(task.get("readScopes") or []),
+            "writeScopes": list(task.get("writeScopes") or []),
+            "acceptanceCriteria": list(task.get("acceptanceCriteria") or []),
+        }
 
     @staticmethod
     def _build_task_dispatch_prompt(task: dict[str, Any]) -> str:

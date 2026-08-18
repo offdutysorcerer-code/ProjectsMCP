@@ -15,7 +15,9 @@
       "line_a23",
       "a3_2",
       "local_agent",
-      "runtime_telemetry"
+      "codex_agent",
+      "runtime_telemetry",
+      "mcp_diagnostics"
     ]
   },
   "settings": {
@@ -31,6 +33,9 @@
     "local_agent_worker_dir": "D:\\AIProjects\\A28-Agent2AgentWithLMStudio",
     "local_agent_timeout_seconds": 180,
     "local_agent_max_concurrent_jobs": 4,
+    "codex_agent_executable": "codex",
+    "codex_agent_timeout_seconds": 900,
+    "codex_agent_max_concurrent_jobs": 2,
     "line_a23_endpoint": "http://127.0.0.1:3000/mcp",
     "line_a23_timeout_seconds": 120,
     "attachment_save_directory": "D:\\07庫電腦D槽-214585\\214585\\C342\\History",

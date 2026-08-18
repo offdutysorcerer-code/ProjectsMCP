@@ -76,6 +76,14 @@ configured in `config.json`. On timeout, ProjectsMCP terminates the full Windows
 tree and returns `timed_out`, `duration_seconds`, and captured output instead of leaving
 the MCP request hanging. Output is capped by `max_command_output_bytes`.
 
+Shell execution is centralized through `ExecutionRuntimeService`, which sits above
+`ProcessService`. PowerShell execution is delegated to `PowerShellRunner`, which owns
+standard `-NoProfile` / `-NonInteractive` / `-ExecutionPolicy Bypass` flags, UTF-8
+console/bootstrap settings, working-directory validation, environment forwarding, and
+PowerShell executable selection. `ProcessService` remains the lower-level owner of
+process creation, PID capture, timeout enforcement, bounded stdout/stderr capture,
+environment normalization, and process-tree cleanup.
+
 ### Browser plugin tools
 
 The Browser plugin is backed by Playwright and uses a `browser_` prefix:
@@ -423,33 +431,49 @@ Long-running A28 / LM Studio coding tasks can be dispatched without holding an M
 `local_agent_max_concurrent_jobs` controls the local dispatcher worker pool size (default: 4). Each running job starts its own A28 worker process through `ProcessService`, so multiple local Agent jobs can progress concurrently. The command plugin likewise offloads blocking command execution from the FastMCP event loop.
 
 
-## A0 Runtime Telemetry / Control Center foundation
+## A0 Runtime Telemetry / Execution Trace v2
 
-A0 now normalizes orchestration activity into a shared runtime telemetry stream. The first schema covers tasks, agents/workers, MCP tool executions, resource claims, waits, dispatches, and an append-only event envelope.
+A0 normalizes orchestration activity into a shared runtime telemetry stream covering tasks, agents/workers, MCP tool executions, resource claims, waits, dispatches, and an append-only event envelope. Each server process creates a new `bootId`. Every audited FastMCP tool invocation creates a local execution context with a `runId`, `traceId`, and root `spanId`; its started/completed/failed/cancelled lifecycle retains those same identifiers. In-process task and dispatch telemetry inherits that context through Python `contextvars` where context propagation permits. When a worker thread emits telemetry without an active context but supplies a known `task_id`, the runtime reuses correlation already stored on that task.
 
-Runtime files are stored under `artifacts/runtime/` and remain outside Git:
+Identifier semantics:
 
+- `bootId` identifies one A0 server process lifetime. A restart always creates a new value.
+- `runId` identifies one top-level audited MCP tool run; any in-process child spans retain that run.
+- `traceId` groups the root MCP tool and A0-internal task/dispatch activity that actually inherited or explicitly carried its correlation.
+- `spanId` identifies one local audited tool span; `parentSpanId` links an in-process child span to its recorded parent. Current child state records retain inherited correlation rather than inventing spans across transports.
+
+Correlation is deliberately local and evidence-based. A new MCP request arriving after an external Agent or Connector boundary is a **new trace** unless that transport explicitly propagates a supported correlation token. A0 does not infer relationships from timing, task wording, ChatGPT conversations, or private model reasoning.
+
+Runtime files remain outside Git and are isolated by server profile:
+
+- MAIN: `artifacts/runtime/`
+- DEV: `artifacts/dev/runtime/`
 - `events/YYYY-MM-DD.jsonl` — one normalized event per line.
 - `state.json` — the latest derived state for Control Center consumption.
+
+The DEV launcher explicitly passes `PROJECTSMCP_ENVIRONMENT`, `PROJECTSMCP_CONFIG_PATH`, and `PROJECTSMCP_ARTIFACTS_DIR` through `mcp-proxy` with `-e`; `mcp-proxy` does not pass the parent environment to its stdio server by default. This keeps 8090/MAIN and 8091/DEV from sharing configuration or runtime state.
 
 The `runtime_telemetry` plugin exposes:
 
 - `runtime_snapshot()` — current summary plus agents, tasks, tool executions, claims, waits, dispatches, and recent events.
 - `runtime_recent_events(limit=100)` — recent normalized events.
 
-Current producers include MCP tool audit events (`tool.started/completed/failed/cancelled`), Local Agent queue/dispatch/execution lifecycle events, and A3_2 agent/task/path-claim events. The schema is intentionally backend-neutral so A28 LM Studio workers, A3_2 ChatGPT agents, and future workers can appear in one Control Center.
+Current producers include MCP tool audit events (`tool.started/completed/failed/cancelled`), Local Agent and Codex queue/dispatch/execution lifecycle events, and A3_2 agent/task/path-claim events. On startup, the service loads the previous `state.json`, marks prior-boot nonterminal tools/tasks/dispatches as `interrupted`, marks held claims and active waits as `stale`, normalizes busy agents, then immediately writes state under the new `bootId`. These labels describe lost in-memory continuity after restart, not a newly observed remote failure. Per-collection retention caps preserve active records and the newest terminal history so `state.json` does not grow without bound. The append-only daily JSONL event stream remains the raw audit history.
 
 ## A0 Control Center
 
-`A0.ControlCenter` is a read-only WPF + WebView2 dashboard for runtime orchestration telemetry. It reads `artifacts/runtime/state.json` and the latest JSONL event files directly, so the dashboard remains independent from the MCP request path.
+`A0.ControlCenter` is a read-only WPF + WebView2 dashboard for runtime orchestration telemetry. It reads the selected profile's state and latest JSONL event files directly, so the dashboard remains independent from the MCP request path. MAIN uses `config.json` + `artifacts/runtime`; DEV uses `config.dev.json` + `artifacts/dev/runtime`.
 
-Run:
+Run the matching profile explicitly:
 
 ```bat
 StartA0ControlCenter.bat
+StartA0ControlCenter-DEV.bat
 ```
 
-The first version shows work queue/tasks, agents/workers, active resource claims, MCP tool activity, dispatch records, and recent runtime events. It refreshes once per second by default and does not expose cancel/retry/release or other mutating operations.
+The footer shows the active environment and runtime path so MAIN/DEV drift is visible instead of silently mixing data.
+
+The dashboard prominently groups Execution Traces by `traceId` / `runId`, showing the root MCP tool and chronological correlated task/dispatch records. Work without correlation is explicitly labeled as transport-boundary/uncorrelated instead of being attached to a guessed parent. The detailed Client/ChatGPT → MCP invocation panel continues to show actual structured tool parameters, and the MCP/A0 → A2A panel continues to show emitted prompt/scopes. The bridge tails only enough bytes from recent JSONL files for the latest event window instead of loading multi-megabyte files in full. It refreshes once per second by default and does not expose cancel/retry/release or other mutating operations.
 
 ## Public endpoint and connector registration
 
@@ -471,10 +495,7 @@ the same stable URL. If ChatGPT keeps an old session or an old ngrok install-tim
 snapshot, refresh the connector. If refresh does not replace the endpoint, remove
 and reinstall the connector using the production URL above, then start a new chat.
 
-The `mcp_diagnostics()` tool reports the local and public SSE URLs, tunnel
-provider, expected active connector endpoint, server start time and PID, and the
-configuration source. Its tool name and response keys are intentionally stable
-across server restarts.
+The `mcp_diagnostics()` tool reports the runtime environment, config path, artifacts root, local/public SSE URLs, tunnel provider, expected active connector endpoint, server start time and PID, and the configuration source. Its tool name and response keys are intentionally stable across server restarts. `restart_projectsmcp()` and `get_restart_status()` use the current runtime profile: MAIN targets 8090 and `artifacts/restart`, while DEV targets 8091 and `artifacts/dev/restart`.
 
 
 ## Codex Agent plugin
@@ -492,3 +513,41 @@ Tools:
 Default execution uses `codex exec --ephemeral --sandbox workspace-write <PROMPT>`. The adapter also accepts `read-only`; dangerous sandbox bypass modes are intentionally not exposed. The generated worker prompt forbids commit, push, reset, or Git history rewriting.
 
 Windows prerequisite: install the official Codex CLI, authenticate it with ChatGPT, and verify `codex --version` plus `codex login status` before starting ProjectsMCP.
+
+
+### Startup executable registry
+
+A0 creates one `ExecutableRegistry` during server startup and freezes full executable paths for `python`, `uv`, `git`, `node`, `pwsh`, `powershell`, `cmd`, optional `bash`, and `codex`. Execution Runtime, Git, Codex Agent, and Local Agent consume that shared startup snapshot instead of repeatedly resolving PATH during tool calls. Restart A0 after changing PATH or installing/upgrading an executable so the registry can refresh.
+
+`bash` is an optional Execution Runtime target, not a replacement for PowerShell. On Windows, A0 prefers a concrete Git Bash installation and deliberately avoids treating the legacy/WSL `bash.exe` launcher as usable merely because the executable file exists; without a discoverable Git Bash runtime, `shell=bash` is unavailable while CMD and PowerShell continue normally. On Linux, the registry may resolve Bash through the normal executable search path.
+
+
+## Command preflight / normalization
+
+Before `run_cmd`, `run_powershell`, or `run_command` launches a child process, A0 now runs a shared `CommandPreflightChecker`. It validates shell selection, frozen executable availability, working directory, NUL characters, selected PowerShell 5.1 versus 7 compatibility, known external commands, literal `Import-Module` paths, and common CMD/PowerShell syntax-mixing or quoting risks. Fatal findings return `preflight_failed` without creating a child process; warnings are attached to the execution result. Full process environment values remain internal and only a small UTF-8 readiness summary is exposed in the preflight result.
+
+
+## Error classification and controlled recovery
+
+The DEV execution runtime classifies command outcomes before deciding whether any recovery is safe. Current categories include success, success-with-stderr, timeout, command-not-found, execution-policy, missing path/module, preflight failure, and generic process errors. Recovery is intentionally conservative: unambiguous CMD-style `cd /d` used inside PowerShell may be normalized to `Set-Location -LiteralPath` before launch, while command-not-found may be retried at most once only when the Startup Executable Registry already contains a frozen full path for that command. Timeouts, missing cwd/module, and low-confidence failures are not automatically retried. Every repair is returned as structured recovery metadata with its phase, reason, validation status, and retry count.
+
+
+## Known Issues Registry / Preventive Rules
+
+`known_issues.json` is the versioned source of preventive execution rules. `KnownIssuesRegistry` loads it at A0 startup and applies only rules whose status is `active` and whose evidence flags have both `recovery_validated=true` and `validator_passed=true`. Candidate rules are inert and cannot change execution.
+
+The registry supports an explicit candidate lifecycle: `register_candidate(...)` records an observation, while `promote(...)` refuses activation unless both recovery validation and validator success are supplied. Active rule hits are returned under `known_issues.prevented`, including the rule ID and before/after command text, so Control Center can later count prevented incidents.
+
+Current validated DEV rules prevent unambiguous CMD-style `cd /d` from reaching PowerShell and, for PowerShell only, replace known CLI tokens with the frozen Startup Executable Registry path. A CMD full-path rewrite was deliberately rejected after integration validation exposed `cmd.exe /s /c` quoting incompatibility; it remains excluded rather than being promoted from unit-test evidence alone.
+
+
+## Seeded historical PowerShell / execution issues
+
+DEV now seeds the historical execution problem backlog into `known_issues.json`. Policies are explicitly separated into `preventive` rules, which may safely change execution before launch, and `classify_only` rules, which may detect/report/contain a problem but must not rewrite ambiguous commands. Covered categories include execution policy, startup executable/PATH drift, missing uv/python/git-style CLIs, UTF-8/Chinese output, quoting risk, cwd validation, PowerShell 5.1/7 compatibility, command timeout, process-tree/orphan cleanup, missing PowerShell modules, and CMD/PowerShell syntax mismatch. Timeout remains non-retryable and ProcessService now reports `process_tree_terminated` after timeout cleanup. Missing modules and ambiguous quoting are intentionally not auto-installed or auto-rewritten.
+
+
+## Execution Runtime Health contract
+
+A0 exposes `executionRuntimeHealth` in both `runtime_snapshot()` and persisted RuntimeTelemetry `state.json`. The aggregation is UI-neutral and is computed from retained `run_command`, `run_cmd`, and `run_powershell` tool executions. It includes retained-window success/failure counts and success rate, timeouts, confirmed process-tree termination, controlled recovery/retry counts, Known Issues prevention hits, shell breakdowns, classification counts, and Known Issue rule-hit counts.
+
+The current Control Center renders this contract in a replaceable `Execution Runtime Health` section. The UI is intentionally not the owner of the aggregation logic, so a future Control Center redesign can replace or remove the current section while continuing to consume the same runtime-state contract. These figures are retained-window telemetry rather than lifetime counters; older records created before classification metadata existed may appear as `unknown` until they age out of the retained window.

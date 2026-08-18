@@ -5,45 +5,73 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>A0 Control Center</title>
   <link rel="stylesheet" href="/styles/app.css">
+  <style>
+    .trace-list{display:grid;gap:14px}.trace-section{border-left-color:#2457d6!important}
+    .trace-card{background:#fff;border:1px solid #cdd9ea;border-left:5px solid #2457d6;border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+    .trace-card.uncorrelated{border-left-color:#d97706;background:#fffcf7}.trace-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+    .trace-head h3{font-size:15px;margin:5px 0;color:#172e50}.trace-head p{font-size:11px;color:var(--muted);margin:3px 0}
+    .trace-identity{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;padding:8px 10px;background:#f4f7fb;border-radius:8px;font-size:10px;color:#53657d}
+    .trace-steps{margin-top:10px}.trace-step{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px}.trace-rail{display:flex;justify-content:center;position:relative}
+    .trace-rail:after{content:"";position:absolute;top:15px;bottom:-4px;width:2px;background:#d8e2ef}.trace-step:last-child .trace-rail:after{display:none}
+    .trace-rail span{position:relative;z-index:1;width:10px;height:10px;margin-top:5px;border-radius:50%;background:#6d8fdc;border:2px solid #fff;box-shadow:0 0 0 1px #9db2d3}
+    .trace-step.task .trace-rail span{background:#15803d}.trace-step.dispatch .trace-rail span{background:#8b5cf6}.trace-step-body{padding:0 0 14px}
+    .trace-step-head{display:flex;align-items:center;gap:8px;margin-bottom:3px}.trace-step-body>strong{font-size:12px}.trace-ids{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:5px;color:#718096;font-size:9px}
+    .badge.correlated{background:#eef4ff;color:#2457d6}.badge.uncorrelated,.badge.interrupted,.badge.stale{background:#fff7ed;color:#b45309}
+    .runtime-health-grid{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:9px}.runtime-health-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 12px;box-shadow:var(--shadow)}
+    .runtime-health-card .label{font-size:10px;color:var(--muted)}.runtime-health-card .value{font-size:21px;font-weight:800;margin-top:3px}.runtime-health-detail{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.runtime-health-list{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}.runtime-health-list h3{font-size:12px;margin:0 0 7px;color:#18345d}.runtime-health-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #edf1f5;font-size:11px}.runtime-health-row:last-child{border-bottom:0}@media(max-width:1100px){.runtime-health-grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:720px){.runtime-health-grid,.runtime-health-detail{grid-template-columns:1fr 1fr}}
+  </style>
 </head>
 <body>
 <header class="topbar">
-  <div>
-    <div class="brand">A0 Control Center</div>
-    <div class="sub">MCP / Agent / Work Orchestration Runtime Monitor</div>
-  </div>
-  <div class="top-actions">
-    <span id="connection" class="status-pill">Loading</span>
-    <label class="switch"><input id="autoRefresh" type="checkbox" checked><span>Auto</span></label>
-    <button id="refresh">重新整理</button>
-  </div>
+  <div><div class="brand">A0 Control Center</div><div class="sub">執行與工作流程中心 · Runtime telemetry</div></div>
+  <div class="top-actions"><span id="connection" class="status-pill">Loading</span><label class="switch"><input id="autoRefresh" type="checkbox" checked><span>Auto</span></label><button id="refresh">重新整理</button></div>
 </header>
 <main class="page">
-  <section class="section infra-section">
-    <div class="section-title"><div><h2>Infrastructure</h2><p>ProjectsMCP / Cloudflare Tunnel / Connector 即時狀態</p></div></div>
-    <div id="infrastructure" class="infra-grid"></div>
-  </section>
   <section id="summary" class="summary"></section>
-  <section class="section">
-    <div class="section-title"><div><h2>Work Queue / Tasks</h2><p>排隊、執行、等待與完成中的工作</p></div><span id="taskCount" class="count"></span></div>
-    <div class="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Project / Path</th><th>Objective</th><th>Updated</th></tr></thead><tbody id="tasks"></tbody></table></div>
+
+  <section class="section primary">
+    <div class="section-title"><div><h2>Execution Runtime Health</h2><p>CMD / PowerShell 執行健康度；統計範圍為目前 RuntimeTelemetry 保留的 command tool executions，不代表終身累計。</p></div><span id="runtimeHealthScope" class="count"></span></div>
+    <div id="runtimeHealth" class="runtime-health-grid"></div>
+    <div class="runtime-health-detail"><div id="runtimeClassifications" class="runtime-health-list"></div><div id="runtimeKnownIssues" class="runtime-health-list"></div></div>
   </section>
-  <div class="split">
-    <section class="section"><div class="section-title"><div><h2>Agents / Workers</h2><p>Agent 狀態與目前工作</p></div></div><div id="agents" class="cards"></div></section>
-    <section class="section"><div class="section-title"><div><h2>Claims / Mutex</h2><p>資源占用與互斥狀態</p></div></div><div id="claims" class="cards"></div></section>
-  </div>
-  <section class="section">
-    <div class="section-title"><div><h2>Tool Activity</h2><p>MCP 工具執行、耗時與錯誤</p></div></div>
-    <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Status</th><th>Task / Agent</th><th>Duration</th><th>Started</th><th>Result / Error</th></tr></thead><tbody id="tools"></tbody></table></div>
+
+  <section class="section primary trace-section">
+    <div class="section-title"><div><h2>Execution Traces</h2><p>依 traceId / runId 彙整實際 MCP tool、task 與 dispatch telemetry。外部 Agent／Connector 邊界若未明確傳遞 correlation token，後續 MCP request 會是新 trace，不猜測跨邊界關聯。</p></div><span id="traceCount" class="count"></span></div>
+    <div id="traces" class="trace-list"></div>
   </section>
-  <section class="section">
-    <div class="section-title"><div><h2>Dispatch</h2><p>工作從協調者交派到 Agent 的紀錄</p></div></div>
-    <div class="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>From</th><th>To</th><th>Backend</th><th>Updated</th></tr></thead><tbody id="dispatches"></tbody></table></div>
+
+  <section class="section primary">
+    <div class="section-title"><div><h2>目前正在執行</h2><p>同時彙整 running tasks 與 running tool executions；未關聯 task 的直接 MCP 呼叫也會顯示。</p></div><span id="currentCount" class="count"></span></div>
+    <div id="currentWork" class="work-grid"></div>
   </section>
-  <section class="section">
-    <div class="section-title"><div><h2>Recent Events</h2><p>Runtime telemetry event stream</p></div><span id="eventCount" class="count"></span></div>
-    <div id="events" class="events"></div>
+
+  <section class="section primary">
+    <div class="section-title"><div><h2>Client / ChatGPT → MCP tool</h2><p>FastMCP 實際收到的工具呼叫邊界與結構化參數；不代表或推測 ChatGPT 私有推理。</p></div><span id="toolCount" class="count"></span></div>
+    <div id="tools" class="flow-list"></div>
   </section>
+
+  <section class="section">
+    <div class="section-title"><div><h2>最近／已完成工作</h2><p>最近結束的 tasks 與 MCP tool executions。</p></div><span id="recentCount" class="count"></span></div>
+    <div id="recentWork" class="compact-list"></div>
+  </section>
+
+  <section class="section primary">
+    <div class="section-title"><div><h2>MCP / A0 → A2A Agent</h2><p>交派目標、工作範圍、驗收條件與實際送出的 dispatch prompt。</p></div><span id="dispatchCount" class="count"></span></div>
+    <div id="dispatches" class="flow-list"></div>
+  </section>
+
+  <details class="diagnostics section">
+    <summary><strong>診斷資訊</strong><span>Infrastructure、Agents、Claims / Mutex、Tasks 與 Raw Events</span></summary>
+    <div class="diagnostic-body">
+      <section><div class="section-title"><div><h2>Infrastructure</h2><p>ProjectsMCP / Cloudflare Tunnel / Connector</p></div></div><div id="infrastructure" class="infra-grid"></div></section>
+      <div class="split">
+        <section><div class="section-title"><div><h2>Agents / Workers</h2></div></div><div id="agents" class="cards"></div></section>
+        <section><div class="section-title"><div><h2>Claims / Mutex</h2></div></div><div id="claims" class="cards"></div></section>
+      </div>
+      <section><div class="section-title"><div><h2>全部 Tasks</h2></div><span id="taskCount" class="count"></span></div><div class="table-wrap"><table><thead><tr><th>Task</th><th>Status</th><th>Agent</th><th>Project / Path</th><th>Objective</th><th>Updated</th></tr></thead><tbody id="tasks"></tbody></table></div></section>
+      <section><div class="section-title"><div><h2>Raw Recent Events</h2></div><span id="eventCount" class="count"></span></div><div id="events" class="events"></div></section>
+    </div>
+  </details>
 </main>
 <footer class="footer"><span id="runtimePath"></span><span id="updatedAt"></span></footer>
 <script src="/scripts/app.js"></script>

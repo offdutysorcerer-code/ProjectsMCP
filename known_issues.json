@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "ps-cmd-cd-d-to-set-location-v1",
+      "issue_code": "cmd_syntax_in_powershell",
+      "status": "active",
+      "description": "Convert unambiguous CMD-style cd /d used in PowerShell into Set-Location -LiteralPath before execution.",
+      "action": "cmd_cd_to_set_location",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "DEV recovery + integration validation 2026-08-18",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "known-cli-use-startup-registry-path-v1",
+      "issue_code": "command_not_found",
+      "status": "active",
+      "description": "In PowerShell, replace known CLI tokens such as uv/python/git/node/codex with the frozen A0 startup executable path before execution. CMD is excluded until quoting passes integration validation.",
+      "action": "use_registry_full_path",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "DEV PowerShell command-path validation 2026-08-18; CMD scope rejected by integration validator",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "powershell-execution-policy-bypass-v1",
+      "issue_code": "execution_policy",
+      "status": "active",
+      "description": "Always launch A0-managed PowerShell with -ExecutionPolicy Bypass, -NoProfile and -NonInteractive rather than mutating machine/user execution policy.",
+      "action": "standard_powershell_flags",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "PowerShellRunner DEV integration validation 2026-08-18",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "startup-executable-registry-v1",
+      "issue_code": "path_environment_drift",
+      "status": "active",
+      "description": "Freeze python/uv/git/node/pwsh/powershell/cmd/codex executable paths at A0 startup to prevent PATH drift during one process lifetime.",
+      "action": "startup_registry",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "ExecutableRegistry DEV integration validation 2026-08-18",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "powershell-utf8-runtime-v1",
+      "issue_code": "utf8_encoding",
+      "status": "active",
+      "description": "Force UTF-8 console input/output plus PYTHONUTF8=1 and PYTHONIOENCODING=utf-8 for A0-managed PowerShell commands.",
+      "action": "utf8_environment",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "PowerShellRunner Chinese UTF-8 DEV integration validation 2026-08-18",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "cwd-preflight-v1",
+      "issue_code": "missing_cwd",
+      "status": "active",
+      "description": "Resolve and validate cwd before process creation; reject missing or invalid working directories instead of allowing shell-dependent fallback behavior.",
+      "action": "validate_cwd",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "CommandPreflight DEV integration validation 2026-08-18",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "powershell-version-compatibility-v1",
+      "issue_code": "powershell_version_incompatible",
+      "status": "active",
+      "description": "Block known PowerShell 7-only syntax such as ForEach-Object -Parallel when the selected executable is Windows PowerShell 5.1.",
+      "action": "version_preflight",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "CommandPreflight compatibility tests 2026-08-18",
+      "mode": "preventive"
+    },
+    {
+      "rule_id": "quoting-risk-preflight-v1",
+      "issue_code": "unbalanced_double_quote",
+      "status": "active",
+      "description": "Flag suspicious unbalanced quoting before execution; do not auto-rewrite ambiguous quoting.",
+      "action": "warn_only",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "CommandPreflight quoting tests 2026-08-18",
+      "mode": "classify_only"
+    },
+    {
+      "rule_id": "command-timeout-no-retry-v1",
+      "issue_code": "timeout",
+      "status": "active",
+      "description": "Classify command timeout as high-confidence non-retryable and terminate the process tree instead of blindly retrying.",
+      "action": "terminate_tree_no_retry",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "PowerShellRunner/RecoveryEngine timeout DEV integration validation 2026-08-18",
+      "mode": "classify_only"
+    },
+    {
+      "rule_id": "orphan-process-cleanup-v1",
+      "issue_code": "orphan_process",
+      "status": "active",
+      "description": "Use process-group/tree termination on timeout so child processes do not remain orphaned; expose PID and termination outcome for audit.",
+      "action": "process_tree_cleanup",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "ProcessService timeout PID termination DEV integration validation 2026-08-18",
+      "mode": "classify_only"
+    },
+    {
+      "rule_id": "module-not-found-observation-v1",
+      "issue_code": "module_not_found",
+      "status": "active",
+      "description": "Detect missing module paths and classify missing modules, but never auto-install or mutate PSModulePath without a separately validated policy.",
+      "action": "observe_only",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "CommandPreflight module checks + no-auto-install safety policy 2026-08-18",
+      "mode": "classify_only"
+    },
+    {
+      "rule_id": "shell-syntax-mismatch-v1",
+      "issue_code": "shell_syntax_mismatch",
+      "status": "active",
+      "description": "Detect CMD syntax used in PowerShell and PowerShell $env: syntax used in CMD; only unambiguous validated cases may be rewritten.",
+      "action": "shell_syntax_preflight",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "CommandPreflight + KnownIssuesRegistry DEV validation 2026-08-18",
+      "mode": "classify_only"
+    }
+  ]
+}

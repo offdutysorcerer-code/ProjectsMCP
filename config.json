@@ -15,15 +15,27 @@
       "line_a23",
       "a3_2",
       "local_agent",
-      "runtime_telemetry"
+      "codex_agent",
+      "runtime_telemetry",
+      "mcp_diagnostics"
     ]
   },
   "settings": {
+    "endpoint": {
+      "local_sse_url": "http://127.0.0.1:8090/sse",
+      "public_sse_url": "https://mcp-main.offdutylab.xyz/sse",
+      "active_tunnel_provider": "cloudflare",
+      "active_connector_endpoint": "https://mcp-main.offdutylab.xyz/sse",
+      "generation_source": "config.json:settings.endpoint"
+    },
     "a3_2_endpoint": "http://127.0.0.1:5139",
     "a3_2_timeout_seconds": 120,
     "local_agent_worker_dir": "D:\\AIProjects\\A28-Agent2AgentWithLMStudio",
     "local_agent_timeout_seconds": 180,
     "local_agent_max_concurrent_jobs": 4,
+    "codex_agent_executable": "codex",
+    "codex_agent_timeout_seconds": 900,
+    "codex_agent_max_concurrent_jobs": 2,
     "line_a23_endpoint": "http://127.0.0.1:3000/mcp",
     "line_a23_timeout_seconds": 120,
     "attachment_save_directory": "D:\\07庫電腦D槽-214585\\214585\\C342\\History",

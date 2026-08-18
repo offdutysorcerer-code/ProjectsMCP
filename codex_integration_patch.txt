@@ -1,0 +1,55 @@
+Codex adapter bootstrap integration changes
+==========================================
+
+1) mcp_platform/context.py
+- Add import:
+  from services.codex_agent_service import CodexAgentService
+- Add PlatformContext field:
+  codex_agent_service: CodexAgentService
+
+2) server.py
+- Add import:
+  from services.codex_agent_service import CodexAgentService
+- After local_agent_service initialization, add:
+
+codex_agent_service = CodexAgentService(
+    file_service=file_service,
+    process_service=process_service,
+    executable=str(settings.get("codex_agent_executable", "codex")),
+    timeout_seconds=int(settings.get("codex_agent_timeout_seconds", 900)),
+    max_concurrent_jobs=int(settings.get("codex_agent_max_concurrent_jobs", 2)),
+    telemetry=runtime_telemetry_service,
+)
+
+- Add to PlatformContext constructor:
+  codex_agent_service=codex_agent_service,
+
+3) config.json
+- Add "codex_agent" to plugins.enabled.
+- Add settings:
+  "codex_agent_executable": "codex",
+  "codex_agent_timeout_seconds": 900,
+  "codex_agent_max_concurrent_jobs": 2,
+
+4) README.md
+Add a Codex Agent section documenting these MCP tools:
+- codex_agent_status()
+- codex_agent_submit_task(project, working_path, objective, acceptance_criteria, constraints=None, task_id="", sandbox="workspace-write", model="", timeout_seconds=900)
+- codex_agent_task_status(task_id)
+- codex_agent_task_result(task_id)
+- codex_agent_run_task(...)
+
+The adapter invokes the official Codex CLI directly with:
+  codex exec --ephemeral --sandbox workspace-write <PROMPT>
+It does not route through LM Studio/A28.
+
+Installation/authentication prerequisite on Windows:
+- Install the official Codex CLI.
+- Run `codex` once and choose Sign in with ChatGPT, or otherwise configure supported Codex authentication.
+- Verify with `codex login status`.
+
+Safety defaults:
+- workspace-write sandbox for coding tasks.
+- read-only is also accepted.
+- no dangerous bypass flag.
+- prompt explicitly forbids commit, push, reset, or rewriting Git history.

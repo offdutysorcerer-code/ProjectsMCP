@@ -1,13 +1,16 @@
 param(
+    [int]$Port = 8091,
     [int]$DelaySeconds = 3,
-    [int]$StartupTimeoutSeconds = 30
+    [int]$StartupTimeoutSeconds = 30,
+    [string]$ResultPath = ""
 )
 
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
-$port=8091
-$resultDir=Join-Path $projectRoot 'artifacts\dev\restart'
-$resultPath=Join-Path $resultDir 'latest.json'
+$port=$Port
+if (-not $ResultPath) { $ResultPath=Join-Path $projectRoot 'artifacts\dev\restart\latest.json' }
+$resultPath=$ResultPath
+$resultDir=Split-Path -Parent $resultPath
 $lockPath=Join-Path $resultDir 'restart.lock'
 New-Item -ItemType Directory -Force $resultDir | Out-Null
 $requestedAt=Get-Date
@@ -23,10 +26,13 @@ function Write-Result([string]$Status,[string]$Message,[int]$OldPid=0,[int]$NewP
     ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $resultPath
 }
 function Test-Ready {
+  $client=$null;$response=$null
   try{
-    $req=[System.Net.HttpWebRequest]::Create("http://127.0.0.1:$port/mcp");$req.Method='GET';$req.Timeout=1000;$req.ReadWriteTimeout=1000
-    $res=$req.GetResponse();try{return [int]$res.StatusCode -lt 500}finally{$res.Dispose()}
-  }catch [System.Net.WebException]{if($_.Exception.Response){try{return [int]$_.Exception.Response.StatusCode -lt 500}finally{$_.Exception.Response.Dispose()}};return $false}catch{return $false}
+    Add-Type -AssemblyName System.Net.Http
+    $client=[System.Net.Http.HttpClient]::new();$client.Timeout=[TimeSpan]::FromSeconds(1)
+    $response=$client.GetAsync("http://127.0.0.1:$port/sse",[System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+    return $response.IsSuccessStatusCode -and $response.Content.Headers.ContentType.MediaType -eq 'text/event-stream'
+  }catch{return $false}finally{if($response){$response.Dispose()};if($client){$client.Dispose()}}
 }
 try{
   try{$lock=[System.IO.File]::Open($lockPath,[System.IO.FileMode]::OpenOrCreate,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None)}catch [System.IO.IOException]{Write-Result 'already_running' 'Another DEV restart is already running.';exit 2}

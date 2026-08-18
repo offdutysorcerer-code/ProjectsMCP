@@ -71,7 +71,11 @@ try {
 
     $arguments = @($uvCommand.Prefix) + @(
         "tool","run","--with","mcp>=1.27,<2","mcp-proxy==0.12.0",
-        "--host",$HostAddress,"--port",$Port,"--",$uvCommand.Executable
+        "--host",$HostAddress,"--port",$Port,
+        "-e","PROJECTSMCP_CONFIG_PATH",$env:PROJECTSMCP_CONFIG_PATH,
+        "-e","PROJECTSMCP_ARTIFACTS_DIR",$env:PROJECTSMCP_ARTIFACTS_DIR,
+        "-e","PROJECTSMCP_ENVIRONMENT",$env:PROJECTSMCP_ENVIRONMENT,
+        "--",$uvCommand.Executable
     ) + @($uvCommand.Prefix) + @(
         "run","--with-requirements","requirements.txt","python","server.py"
     )

@@ -1,1 +1,3 @@
-https://spout-mandolin-doable.ngrok-free.dev/sse
+LEGACY REFERENCE FILE ONLY - not read by ProjectsMCP runtime or connector generation.
+Active endpoint source: config.json -> settings.endpoint.public_sse_url
+https://mcp-main.offdutylab.xyz/sse

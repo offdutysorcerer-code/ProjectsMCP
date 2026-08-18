@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from services.executable_registry import ExecutableRegistry
 from services.file_service import FileService
 from services.process_service import ProcessService
 
@@ -41,9 +42,11 @@ class LocalAgentService:
         timeout_seconds: int = 180,
         max_concurrent_jobs: int = 4,
         telemetry: Any | None = None,
+        executables: ExecutableRegistry | None = None,
     ) -> None:
         self.file_service = file_service
         self.process_service = process_service
+        self.executables = executables or ExecutableRegistry(("git", "pwsh", "powershell"))
         self.worker_dir = worker_dir.resolve()
         self.worker_script = self.worker_dir / "local-coding-worker.ps1"
         self.token_file = self.worker_dir / "token.txt"
@@ -119,48 +122,60 @@ class LocalAgentService:
             if existing is not None and not existing.done():
                 raise ValueError(f"Local agent task is already active: {normalized_task_id}")
 
-            future = self._executor.submit(
-                self.run_task,
-                project=project,
-                source_path=source_path,
-                objective=objective,
-                acceptance_criteria=acceptance_criteria,
-                constraints=constraints,
+            # Record correlation before the worker thread starts. ContextVars do not
+            # propagate into ThreadPoolExecutor workers, so task.started/final events
+            # can reuse the correlation already stored on this task.
+            self._emit(
+                "task.queued",
                 task_id=normalized_task_id,
-                max_changed_lines=max_changed_lines,
-                validation_command=validation_command,
-                timeout_seconds=timeout_seconds,
+                agent_id="localdeveloper",
+                data={
+                    "title": objective[:120],
+                    "objective": objective,
+                    "project": project,
+                    "workingPath": source_path,
+                    "assignedTo": "localdeveloper",
+                    "backend": "lmstudio",
+                    "queuedAt": self._now(),
+                },
             )
+            self._emit(
+                "dispatch.accepted",
+                task_id=normalized_task_id,
+                agent_id="localdeveloper",
+                data={
+                    "dispatchId": f"dispatch-{normalized_task_id}",
+                    "fromAgentId": "mcp-client",
+                    "toAgentId": "localdeveloper",
+                    "backend": "lmstudio",
+                },
+            )
+            try:
+                future = self._executor.submit(
+                    self.run_task,
+                    project=project,
+                    source_path=source_path,
+                    objective=objective,
+                    acceptance_criteria=acceptance_criteria,
+                    constraints=constraints,
+                    task_id=normalized_task_id,
+                    max_changed_lines=max_changed_lines,
+                    validation_command=validation_command,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception as exc:
+                self._emit(
+                    "task.failed",
+                    task_id=normalized_task_id,
+                    agent_id="localdeveloper",
+                    severity="error",
+                    data={"resultStatus": "submit_failed", "error": f"{type(exc).__name__}: {exc}"},
+                )
+                raise
             self._jobs[normalized_task_id] = future
             future.add_done_callback(
                 lambda completed, tid=normalized_task_id: self._persist_future_result(tid, completed)
             )
-
-        self._emit(
-            "task.queued",
-            task_id=normalized_task_id,
-            agent_id="localdeveloper",
-            data={
-                "title": objective[:120],
-                "objective": objective,
-                "project": project,
-                "workingPath": source_path,
-                "assignedTo": "localdeveloper",
-                "backend": "lmstudio",
-                "queuedAt": self._now(),
-            },
-        )
-        self._emit(
-            "dispatch.accepted",
-            task_id=normalized_task_id,
-            agent_id="localdeveloper",
-            data={
-                "dispatchId": f"dispatch-{normalized_task_id}",
-                "fromAgentId": "mcp-client",
-                "toAgentId": "localdeveloper",
-                "backend": "lmstudio",
-            },
-        )
 
         return {
             "ok": True,
@@ -360,9 +375,12 @@ class LocalAgentService:
                 task_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
 
                 timeout = self.timeout_seconds if timeout_seconds is None else max(10, int(timeout_seconds))
+                powershell = self.executables.preferred_powershell(prefer_pwsh=False)
+                if not powershell:
+                    raise RuntimeError("PowerShell was not found when A0 started.")
                 run = self.process_service.run(
                     [
-                        "powershell.exe",
+                        powershell,
                         "-NoLogo",
                         "-NoProfile",
                         "-NonInteractive",
@@ -537,7 +555,7 @@ class LocalAgentService:
 
     def _git_repo_root(self, source_file: Path) -> Path:
         run = self.process_service.run(
-            ["git", "-C", str(source_file.parent), "rev-parse", "--show-toplevel"],
+            [self.executables.require("git"), "-C", str(source_file.parent), "rev-parse", "--show-toplevel"],
             cwd=source_file.parent,
             timeout_seconds=15,
         )
@@ -550,7 +568,7 @@ class LocalAgentService:
 
     def _require_clean_repo(self, repo_root: Path) -> None:
         run = self.process_service.run(
-            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            [self.executables.require("git"), "-C", str(repo_root), "status", "--porcelain"],
             cwd=repo_root,
             timeout_seconds=15,
         )
@@ -570,7 +588,7 @@ class LocalAgentService:
             if worktree_dir.exists():
                 shutil.rmtree(worktree_dir, ignore_errors=True)
         run = self.process_service.run(
-            ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(worktree_dir), "HEAD"],
+            [self.executables.require("git"), "-C", str(repo_root), "worktree", "add", "--detach", str(worktree_dir), "HEAD"],
             cwd=repo_root,
             timeout_seconds=60,
         )
@@ -581,7 +599,7 @@ class LocalAgentService:
     def _remove_worktree(self, repo_root: Path, worktree_dir: Path) -> None:
         try:
             self.process_service.run(
-                ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)],
+                [self.executables.require("git"), "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)],
                 cwd=repo_root,
                 timeout_seconds=30,
             )
@@ -591,7 +609,7 @@ class LocalAgentService:
             shutil.rmtree(worktree_dir, ignore_errors=True)
         try:
             self.process_service.run(
-                ["git", "-C", str(repo_root), "worktree", "prune"],
+                [self.executables.require("git"), "-C", str(repo_root), "worktree", "prune"],
                 cwd=repo_root,
                 timeout_seconds=15,
             )

@@ -54,25 +54,24 @@ function Write-Result {
 
 function Test-McpHttpReady {
     param([int]$LocalPort)
+    $client = $null
+    $response = $null
     try {
-        $request = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$LocalPort/mcp")
-        $request.Method = 'GET'
-        $request.Timeout = 1000
-        $request.ReadWriteTimeout = 1000
-        $response = $request.GetResponse()
-        try {
-            return ([int]$response.StatusCode -lt 500)
-        }
-        finally { $response.Dispose() }
-    }
-    catch [System.Net.WebException] {
-        if ($null -ne $_.Exception.Response) {
-            try { return ([int]$_.Exception.Response.StatusCode -lt 500) }
-            finally { $_.Exception.Response.Dispose() }
-        }
-        return $false
+        Add-Type -AssemblyName System.Net.Http
+        $client = [System.Net.Http.HttpClient]::new()
+        $client.Timeout = [TimeSpan]::FromSeconds(1)
+        $response = $client.GetAsync(
+            "http://127.0.0.1:$LocalPort/sse",
+            [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+        ).GetAwaiter().GetResult()
+        return $response.IsSuccessStatusCode -and
+            $response.Content.Headers.ContentType.MediaType -eq 'text/event-stream'
     }
     catch { return $false }
+    finally {
+        if ($null -ne $response) { $response.Dispose() }
+        if ($null -ne $client) { $client.Dispose() }
+    }
 }
 
 try {

@@ -9,6 +9,8 @@ import time
 import uuid
 from typing import Any, Callable
 
+from mcp_platform.telemetry_context import new_tool_context, use_telemetry_context
+
 logger = logging.getLogger("projectsmcp.audit")
 
 _SENSITIVE_KEYS = {
@@ -113,6 +115,14 @@ def _result_summary(result: Any) -> Any:
     return _sanitize(result)
 
 
+def _task_id_for_call(func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
+    try:
+        value = inspect.signature(func).bind_partial(*args, **kwargs).arguments.get("task_id")
+    except Exception:
+        value = kwargs.get("task_id")
+    return str(value or "") or None
+
+
 def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
     """Wrap FastMCP's tool decorator so every registered tool is audit logged."""
     original_tool = mcp.tool
@@ -129,11 +139,91 @@ def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
                     request_id = uuid.uuid4().hex[:12]
                     started = time.perf_counter()
                     params = _summarize_call(func, args, kwargs)
+                    task_id = _task_id_for_call(func, args, kwargs)
+                    with use_telemetry_context(new_tool_context()):
+                        if telemetry is not None:
+                            telemetry.emit(
+                                "tool.started",
+                                source="mcp",
+                                task_id=task_id,
+                                request_id=request_id,
+                                data={"tool": tool_name, "parameters": params},
+                            )
+                        logger.info(
+                            "TOOL_START request_id=%s tool=%s params=%s",
+                            request_id,
+                            tool_name,
+                            json.dumps(params, ensure_ascii=False, separators=(",", ":")),
+                        )
+                        try:
+                            result = await func(*args, **kwargs)
+                        except asyncio.CancelledError:
+                            elapsed_ms = int((time.perf_counter() - started) * 1000)
+                            if telemetry is not None:
+                                telemetry.emit(
+                                    "tool.cancelled",
+                                    source="mcp",
+                                    task_id=task_id,
+                                    request_id=request_id,
+                                    data={"tool": tool_name, "durationMs": elapsed_ms},
+                                )
+                            logger.warning(
+                                "TOOL_CANCEL request_id=%s tool=%s duration_ms=%s",
+                                request_id,
+                                tool_name,
+                                elapsed_ms,
+                            )
+                            raise
+                        except Exception as exc:
+                            elapsed_ms = int((time.perf_counter() - started) * 1000)
+                            if telemetry is not None:
+                                telemetry.emit(
+                                    "tool.failed",
+                                    source="mcp",
+                                    severity="error",
+                                    task_id=task_id,
+                                    request_id=request_id,
+                                    data={"tool": tool_name, "durationMs": elapsed_ms, "error": f"{type(exc).__name__}: {exc}"},
+                                )
+                            logger.exception(
+                                "TOOL_ERROR request_id=%s tool=%s duration_ms=%s",
+                                request_id,
+                                tool_name,
+                                elapsed_ms,
+                            )
+                            raise
+                        elapsed_ms = int((time.perf_counter() - started) * 1000)
+                        if telemetry is not None:
+                            telemetry.emit(
+                                "tool.completed",
+                                source="mcp",
+                                task_id=task_id,
+                                request_id=request_id,
+                                data={"tool": tool_name, "durationMs": elapsed_ms, "resultSummary": _result_summary(result)},
+                            )
+                        logger.info(
+                            "TOOL_END request_id=%s tool=%s duration_ms=%s result=%s",
+                            request_id,
+                            tool_name,
+                            elapsed_ms,
+                            json.dumps(_result_summary(result), ensure_ascii=False, separators=(",", ":")),
+                        )
+                        return result
+
+                return original_decorator(async_wrapper)
+
+            @functools.wraps(func)
+            def sync_wrapper(*args: Any, **kwargs: Any):
+                request_id = uuid.uuid4().hex[:12]
+                started = time.perf_counter()
+                params = _summarize_call(func, args, kwargs)
+                task_id = _task_id_for_call(func, args, kwargs)
+                with use_telemetry_context(new_tool_context()):
                     if telemetry is not None:
                         telemetry.emit(
                             "tool.started",
                             source="mcp",
-                            task_id=str(kwargs.get("task_id") or "") or None,
+                            task_id=task_id,
                             request_id=request_id,
                             data={"tool": tool_name, "parameters": params},
                         )
@@ -144,24 +234,7 @@ def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
                         json.dumps(params, ensure_ascii=False, separators=(",", ":")),
                     )
                     try:
-                        result = await func(*args, **kwargs)
-                    except asyncio.CancelledError:
-                        elapsed_ms = int((time.perf_counter() - started) * 1000)
-                        if telemetry is not None:
-                            telemetry.emit(
-                                "tool.cancelled",
-                                source="mcp",
-                                task_id=str(kwargs.get("task_id") or "") or None,
-                                request_id=request_id,
-                                data={"tool": tool_name, "durationMs": elapsed_ms},
-                            )
-                        logger.warning(
-                            "TOOL_CANCEL request_id=%s tool=%s duration_ms=%s",
-                            request_id,
-                            tool_name,
-                            elapsed_ms,
-                        )
-                        raise
+                        result = func(*args, **kwargs)
                     except Exception as exc:
                         elapsed_ms = int((time.perf_counter() - started) * 1000)
                         if telemetry is not None:
@@ -169,7 +242,7 @@ def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
                                 "tool.failed",
                                 source="mcp",
                                 severity="error",
-                                task_id=str(kwargs.get("task_id") or "") or None,
+                                task_id=task_id,
                                 request_id=request_id,
                                 data={"tool": tool_name, "durationMs": elapsed_ms, "error": f"{type(exc).__name__}: {exc}"},
                             )
@@ -185,7 +258,7 @@ def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
                         telemetry.emit(
                             "tool.completed",
                             source="mcp",
-                            task_id=str(kwargs.get("task_id") or "") or None,
+                            task_id=task_id,
                             request_id=request_id,
                             data={"tool": tool_name, "durationMs": elapsed_ms, "resultSummary": _result_summary(result)},
                         )
@@ -197,65 +270,6 @@ def install_tool_audit(mcp: Any, telemetry: Any | None = None) -> None:
                         json.dumps(_result_summary(result), ensure_ascii=False, separators=(",", ":")),
                     )
                     return result
-
-                return original_decorator(async_wrapper)
-
-            @functools.wraps(func)
-            def sync_wrapper(*args: Any, **kwargs: Any):
-                request_id = uuid.uuid4().hex[:12]
-                started = time.perf_counter()
-                params = _summarize_call(func, args, kwargs)
-                if telemetry is not None:
-                    telemetry.emit(
-                        "tool.started",
-                        source="mcp",
-                        task_id=str(kwargs.get("task_id") or "") or None,
-                        request_id=request_id,
-                        data={"tool": tool_name, "parameters": params},
-                    )
-                logger.info(
-                    "TOOL_START request_id=%s tool=%s params=%s",
-                    request_id,
-                    tool_name,
-                    json.dumps(params, ensure_ascii=False, separators=(",", ":")),
-                )
-                try:
-                    result = func(*args, **kwargs)
-                except Exception as exc:
-                    elapsed_ms = int((time.perf_counter() - started) * 1000)
-                    if telemetry is not None:
-                        telemetry.emit(
-                            "tool.failed",
-                            source="mcp",
-                            severity="error",
-                            task_id=str(kwargs.get("task_id") or "") or None,
-                            request_id=request_id,
-                            data={"tool": tool_name, "durationMs": elapsed_ms, "error": f"{type(exc).__name__}: {exc}"},
-                        )
-                    logger.exception(
-                        "TOOL_ERROR request_id=%s tool=%s duration_ms=%s",
-                        request_id,
-                        tool_name,
-                        elapsed_ms,
-                    )
-                    raise
-                elapsed_ms = int((time.perf_counter() - started) * 1000)
-                if telemetry is not None:
-                    telemetry.emit(
-                        "tool.completed",
-                        source="mcp",
-                        task_id=str(kwargs.get("task_id") or "") or None,
-                        request_id=request_id,
-                        data={"tool": tool_name, "durationMs": elapsed_ms, "resultSummary": _result_summary(result)},
-                    )
-                logger.info(
-                    "TOOL_END request_id=%s tool=%s duration_ms=%s result=%s",
-                    request_id,
-                    tool_name,
-                    elapsed_ms,
-                    json.dumps(_result_summary(result), ensure_ascii=False, separators=(",", ":")),
-                )
-                return result
 
             return original_decorator(sync_wrapper)
 
