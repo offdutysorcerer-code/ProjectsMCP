@@ -23,6 +23,7 @@ class KnownIssueSeedCoverageTests(unittest.TestCase):
             "module_not_found",
             "cmd_syntax_in_powershell",
             "shell_syntax_mismatch",
+            "prefer_structured_file_edit",
         }
         self.assertTrue(required.issubset(codes), required - codes)
 

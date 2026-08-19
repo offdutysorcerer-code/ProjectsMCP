@@ -191,12 +191,72 @@ class CommandPreflightChecker:
                 )
             )
 
+        issues.extend(self._check_powershell_patch_risk(command))
+
         if command.count('"') % 2:
             issues.append(
                 PreflightIssue(
                     "unbalanced_double_quote",
                     "warning",
                     "Command contains an odd number of double quotes; verify quoting before execution.",
+                )
+            )
+        return issues
+
+    @staticmethod
+    def _check_powershell_patch_risk(command: str) -> list[PreflightIssue]:
+        """Flag inline PowerShell that is acting as a large source-code patcher.
+
+        Individual file/process primitives remain allowed. Blocking requires a combination
+        of a long inline command, source-like file targets, and multiple text-rewrite
+        primitives. This keeps normal administration commands usable while steering code
+        edits to structured MCP file operations.
+        """
+        issues: list[PreflightIssue] = []
+        if len(command) < 800:
+            return issues
+
+        source_target = bool(
+            re.search(r"\.(?:ps1|psm1|py|cs|js|ts|tsx|jsx|json|ya?ml|toml|md)(?:[\"'\s;]|$)", command, re.IGNORECASE)
+        )
+        rewrite_markers = (
+            r"\bReadAllText\b",
+            r"\bWriteAllText\b",
+            r"\.Replace\s*\(",
+            r"\.IndexOf\s*\(",
+            r"\.Substring\s*\(",
+            r"\bSet-Content\b",
+            r"\bAdd-Content\b",
+        )
+        rewrite_hits = sum(1 for pattern in rewrite_markers if re.search(pattern, command, re.IGNORECASE))
+        process_markers = (
+            r"\bStart-Process\b",
+            r"-WindowStyle\s+Hidden\b",
+            r"\btaskkill(?:\.exe)?\b",
+            r"\bStop-Process\b",
+            r"\bWin32_Process\b",
+        )
+        process_hits = sum(1 for pattern in process_markers if re.search(pattern, command, re.IGNORECASE))
+
+        if len(command) >= 1200 and source_target and rewrite_hits >= 2:
+            detail = ""
+            if process_hits:
+                detail = " The same command also contains hidden/process-control behavior."
+            issues.append(
+                PreflightIssue(
+                    "prefer_structured_file_edit",
+                    "error",
+                    "Large inline PowerShell appears to be patching source/configuration files. "
+                    "Use MCP FileService operations such as replace_text/write_file or a dedicated patch service instead of pwsh -Command."
+                    + detail,
+                )
+            )
+        elif rewrite_hits >= 2 or (source_target and process_hits >= 2):
+            issues.append(
+                PreflightIssue(
+                    "powershell_inline_patch_risk",
+                    "warning",
+                    "Long inline PowerShell combines file-rewrite or process-control primitives. Prefer structured FileService operations when modifying code.",
                 )
             )
         return issues

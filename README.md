@@ -551,3 +551,10 @@ DEV now seeds the historical execution problem backlog into `known_issues.json`.
 A0 exposes `executionRuntimeHealth` in both `runtime_snapshot()` and persisted RuntimeTelemetry `state.json`. The aggregation is UI-neutral and is computed from retained `run_command`, `run_cmd`, and `run_powershell` tool executions. It includes retained-window success/failure counts and success rate, timeouts, confirmed process-tree termination, controlled recovery/retry counts, Known Issues prevention hits, shell breakdowns, classification counts, and Known Issue rule-hit counts.
 
 The current Control Center renders this contract in a replaceable `Execution Runtime Health` section. The UI is intentionally not the owner of the aggregation logic, so a future Control Center redesign can replace or remove the current section while continuing to consume the same runtime-state contract. These figures are retained-window telemetry rather than lifetime counters; older records created before classification metadata existed may appear as `unknown` until they age out of the retained window.
+
+
+## Defender-friendly PowerShell preflight
+
+A0 keeps PowerShell available for normal Windows administration, but `CommandPreflightChecker` now distinguishes ordinary commands from long inline scripts that behave like source-code patchers. A PowerShell command is blocked with `prefer_structured_file_edit` only when multiple signals combine: a long inline payload, a source/config file target, and multiple rewrite primitives such as `ReadAllText` / `WriteAllText` / `.Replace()` / `.IndexOf()` / `.Substring()`. Hidden/process-control behavior raises the explanation severity but is not blocked by itself.
+
+The preferred remediation is to re-issue the change through structured MCP file operations such as `replace_text` / `write_file`, or a dedicated patch service. A0 does not create Microsoft Defender exclusions, disable AMSI/scanning, or silently translate the rejected PowerShell into another executable script. The corresponding Known Issues rule is `classify_only`, so it records the engineering policy without rewriting commands.

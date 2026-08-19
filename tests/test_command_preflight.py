@@ -72,6 +72,40 @@ class CommandPreflightCheckerTests(unittest.TestCase):
         self.assertEqual(result["executable"], r"C:\\Program Files\\Git\\bin\\bash.exe")
         self.assertEqual(result["env"]["PYTHONUTF8"], "1")
 
+    def test_blocks_large_inline_source_patch_and_guides_to_fileservice(self) -> None:
+        checker = CommandPreflightChecker(self._registry())
+        command = (
+            "$p='agent.ps1';$s=[IO.File]::ReadAllText($p);"
+            "$s=$s.Replace('old','new');$start=$s.IndexOf('function Start-App');"
+            "$s=$s.Substring(0,$start)+'replacement';"
+            "[IO.File]::WriteAllText($p,$s);Start-Process pwsh -WindowStyle Hidden;"
+            + ("# padding for representative long inline patch\n" * 40)
+        )
+        result = checker.check(command, "powershell")
+        self.assertFalse(result["ok"])
+        issue = next(x for x in result["issues"] if x["code"] == "prefer_structured_file_edit")
+        self.assertIn("FileService", issue["message"])
+        self.assertIn("replace_text", issue["message"])
+
+    def test_does_not_block_normal_powershell_process_or_small_file_edit(self) -> None:
+        checker = CommandPreflightChecker(self._registry())
+        normal = checker.check("Start-Process notepad.exe", "powershell")
+        small_edit = checker.check("$s='abc'; $s=$s.Replace('a','b'); Write-Output $s", "powershell")
+        self.assertTrue(normal["ok"])
+        self.assertTrue(small_edit["ok"])
+        self.assertNotIn("prefer_structured_file_edit", [x["code"] for x in normal["issues"]])
+        self.assertNotIn("prefer_structured_file_edit", [x["code"] for x in small_edit["issues"]])
+
+    def test_warns_long_ambiguous_inline_rewrite_without_source_target(self) -> None:
+        checker = CommandPreflightChecker(self._registry())
+        command = (
+            "$s=[IO.File]::ReadAllText($p);$s=$s.Replace('a','b');"
+            "$s=$s.Substring(0,$s.IndexOf('marker'));" + ("Write-Output 'padding';" * 45)
+        )
+        result = checker.check(command, "powershell")
+        self.assertTrue(result["ok"])
+        self.assertIn("powershell_inline_patch_risk", [x["code"] for x in result["issues"]])
+
     def test_blocks_missing_import_module_path(self) -> None:
         checker = CommandPreflightChecker(self._registry())
         result = checker.check(r"Import-Module Z:\\missing\\Nope.psm1", "powershell")

@@ -132,6 +132,17 @@
       "validator_passed": true,
       "source": "CommandPreflight + KnownIssuesRegistry DEV validation 2026-08-18",
       "mode": "classify_only"
+    },
+    {
+      "rule_id": "defender-friendly-inline-powershell-patch-v1",
+      "issue_code": "prefer_structured_file_edit",
+      "status": "active",
+      "description": "Detect long inline PowerShell that combines source/config file rewriting with multiple patch primitives and steer code edits to structured FileService operations instead of pwsh -Command. Do not create Defender exclusions.",
+      "action": "prefer_structured_file_edit",
+      "recovery_validated": true,
+      "validator_passed": true,
+      "source": "Observed Microsoft Defender PowerShell behavior detection 2026-08-17; DEV preflight + integration validator passed 2026-08-19",
+      "mode": "classify_only"
     }
   ]
 }
